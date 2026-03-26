@@ -112,9 +112,14 @@ def run_lvgl_screen(renderer, screen_fn, *args, allow_screensaver=True, **kwargs
                 HardwareButtons.get_instance().update_last_input_time()
                 return _translate_event(event)
 
-            # No result means timeout — launch screensaver and loop back
+            # No result means timeout — launch screensaver and loop back.
+            # Save/restore the LVGL screen so focus and scroll state survive.
             if timeout_ms > 0:
-                lvgl_screensaver_screen(renderer)
+                _lv.save_screen()
+                try:
+                    lvgl_screensaver_screen(renderer)
+                finally:
+                    _lv.restore_screen()
                 # Debounce: wait for the wakeup press to be released so it
                 # doesn't register as input on the re-entered screen.
                 import time
@@ -137,6 +142,14 @@ def lvgl_main_menu_screen(renderer):
 
 def lvgl_screensaver_screen(renderer):
     """Run the LVGL screensaver (bouncing logo). Blocks until any input.
-    The C extension preserves and restores the previous LVGL screen
-    automatically, so the caller's screen state (focus, scroll) is intact."""
-    run_lvgl_screen(renderer, _lv.screensaver_screen, allow_screensaver=False)
+
+    When called from an LVGL screen timeout, the caller wraps this with
+    save_screen/restore_screen to preserve LVGL state.
+
+    When called from a PIL context (controller.start_screensaver), save
+    and restore the PIL canvas to repaint the display."""
+    last_screen = renderer.canvas.copy()
+    try:
+        run_lvgl_screen(renderer, _lv.screensaver_screen, allow_screensaver=False)
+    finally:
+        renderer.show_image(last_screen)
