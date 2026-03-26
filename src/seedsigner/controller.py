@@ -80,6 +80,10 @@ class BackgroundImportThread(BaseThread):
         time_import('seedsigner.views.tools_views')
         time_import('seedsigner.views.settings_views')
 
+        # Initialize LVGL runtime (no hardware impact until a screen is rendered)
+        from seedsigner.gui.screens.lvgl_screens import ensure_lvgl_runtime
+        ensure_lvgl_runtime()
+
 
 
 class Controller(Singleton):
