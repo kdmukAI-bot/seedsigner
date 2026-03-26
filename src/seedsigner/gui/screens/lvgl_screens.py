@@ -6,6 +6,10 @@ LVGL screens render through SeedSigner's existing ST7789 SPI driver via a
 flush callback. Input is handled natively by the LVGL extension (gpiochip
 ioctl GPIO reads). The Renderer.lock is held for the entire lifetime of an
 LVGL screen to prevent PIL-based screens from writing concurrently.
+
+Screensaver: by default all LVGL screens activate the screensaver after
+the configured timeout. Screens that should not trigger the screensaver
+(e.g. camera scanning) pass allow_screensaver=False.
 """
 from __future__ import annotations
 
@@ -19,17 +23,25 @@ logger = logging.getLogger(__name__)
 # Lazy import; set by ensure_lvgl_runtime().
 _lv = None
 
+# Global screensaver timeout; set once during init from Controller setting.
+_screensaver_timeout_ms = 0
+
 
 def ensure_lvgl_runtime():
     """Import and initialize the LVGL runtime (idempotent)."""
-    global _lv
+    global _lv, _screensaver_timeout_ms
     if _lv is not None:
         return
     import seedsigner_lvgl as lv
     lv.lvgl_init(hor_res=240, ver_res=240)
     lv.native_input_init()
     _lv = lv
-    logger.info("LVGL runtime initialized")
+
+    from seedsigner.controller import Controller
+    _screensaver_timeout_ms = Controller.get_instance().screensaver_activation_ms
+
+    logger.info("LVGL runtime initialized (screensaver timeout=%dms)",
+                _screensaver_timeout_ms)
 
 
 def _make_flush_callback(display_driver):
@@ -64,31 +76,52 @@ def _translate_event(event):
     return index
 
 
-def run_lvgl_screen(renderer, screen_fn, *args, **kwargs):
+def run_lvgl_screen(renderer, screen_fn, *args, allow_screensaver=True, **kwargs):
     """Run an LVGL screen function while holding the renderer lock.
 
     Args:
         renderer: The SeedSigner Renderer singleton.
         screen_fn: An LVGL screen function (e.g. _lv.main_menu_screen).
+        allow_screensaver: If True (default), activate the screensaver after
+            the global timeout. Set False for screens that should stay active
+            indefinitely (e.g. camera scanning).
         *args, **kwargs: Passed through to screen_fn.
 
     Returns:
         A SeedSigner-compatible return code (int or RET_CODE constant).
     """
     ensure_lvgl_runtime()
+    timeout_ms = _screensaver_timeout_ms if allow_screensaver else 0
 
     try:
-        with renderer.lock:
-            _lv.set_flush_mode("python")
-            _lv.set_flush_callback(_make_flush_callback(renderer.disp))
-            _lv.clear_result_queue()
-            # Screen functions block internally (run_lvgl_until_result_or_timeout)
-            # pumping LVGL and reading GPIO input until a result is queued.
-            screen_fn(*args, **kwargs)
+        while True:
+            with renderer.lock:
+                _lv.set_flush_mode("python")
+                _lv.set_flush_callback(_make_flush_callback(renderer.disp))
+                _lv.clear_result_queue()
+                if timeout_ms > 0:
+                    screen_fn(*args, wait_timeout_ms=timeout_ms, **kwargs)
+                else:
+                    screen_fn(*args, **kwargs)
 
-        event = _lv.poll_for_result()
-        if event is not None:
-            return _translate_event(event)
+            event = _lv.poll_for_result()
+            if event is not None:
+                # Reset the PIL-side input timer so returning to a PIL screen
+                # doesn't immediately trigger the screensaver.
+                from seedsigner.hardware.buttons import HardwareButtons
+                HardwareButtons.get_instance().update_last_input_time()
+                return _translate_event(event)
+
+            # No result means timeout — launch screensaver and loop back
+            if timeout_ms > 0:
+                lvgl_screensaver_screen(renderer)
+                # Debounce: wait for the wakeup press to be released so it
+                # doesn't register as input on the re-entered screen.
+                import time
+                time.sleep(0.25)
+                continue
+
+            return None
     finally:
         _lv.set_flush_callback(None)
 
@@ -100,3 +133,10 @@ def lvgl_main_menu_screen(renderer):
         Button index (0-3) or RET_CODE__POWER_BUTTON.
     """
     return run_lvgl_screen(renderer, _lv.main_menu_screen)
+
+
+def lvgl_screensaver_screen(renderer):
+    """Run the LVGL screensaver (bouncing logo). Blocks until any input.
+    The C extension preserves and restores the previous LVGL screen
+    automatically, so the caller's screen state (focus, scroll) is intact."""
+    run_lvgl_screen(renderer, _lv.screensaver_screen, allow_screensaver=False)
