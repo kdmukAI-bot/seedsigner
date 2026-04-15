@@ -548,13 +548,12 @@ def generate_screenshots(locale, overflow_scan: bool = False):
             from traceback import print_exc
             print_exc()
 
-    # Import overflow scanner conditionally
-    if overflow_scan:
-        from .overflow import scan_for_overflow, reverse_lookup_msgid, generate_composite_image, write_summary
-
+    # Overflow scan setup
     all_overflow_events = []
-    # Track screenshot subdirs for composite image generation
     screenshot_subdirs = {}
+    if overflow_scan:
+        import shutil
+        from .overflow_scanner.overflow import scan_for_overflow, reverse_lookup_msgid, generate_composite_image, write_summary
 
     for section_name, screenshot_list in setup_screenshots(locale).items():
         subdir = section_name.lower().replace(" ", "_")
@@ -596,6 +595,12 @@ def generate_screenshots(locale, overflow_scan: bool = False):
 
     print(f"Screenshots rendered: {screenshot_renderer.render_count}")
 
+    # Clear any prior overflow report for this locale
+    if overflow_scan:
+        report_dir = os.path.join(screenshot_root, "reports", locale)
+        if os.path.isdir(report_dir):
+            shutil.rmtree(report_dir)
+
     # Generate overflow report and composite images
     if overflow_scan and all_overflow_events:
         # Resolve msgids for all events
@@ -604,7 +609,6 @@ def generate_screenshots(locale, overflow_scan: bool = False):
                 event.msgid, event.msgstr = reverse_lookup_msgid(event.component_text, locale)
 
         # Write summary report
-        report_dir = os.path.join(screenshot_root, "reports", locale)
         summary_path = write_summary(all_overflow_events, report_dir, locale)
         print(f"\nOverflow report written to: {summary_path}")
 
