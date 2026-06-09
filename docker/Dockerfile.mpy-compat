@@ -1,0 +1,9 @@
+FROM python:3.10-slim
+
+RUN pip install --no-cache-dir mpy-cross==1.27.0.post2
+
+COPY tools/mpy_compat_check.py /opt/tools/mpy_compat_check.py
+
+WORKDIR /repo
+
+ENTRYPOINT ["python", "/opt/tools/mpy_compat_check.py"]

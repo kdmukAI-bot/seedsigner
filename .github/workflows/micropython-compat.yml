@@ -1,0 +1,60 @@
+name: MicroPython Compatibility Check
+
+on:
+  pull_request:
+    paths:
+      - 'src/seedsigner/**/*.py'
+      - 'tools/mpy_compat_check.py'
+      - '.github/workflows/micropython-compat.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  compat-check:
+    runs-on: ubuntu-latest
+    # Explicitly restrict the auto-provisioned GITHUB_TOKEN to the least privilege
+    # required for this workflow. Declaring a permissions block implicitly sets all
+    # unspecified scopes to `none`, so `contents: read` must be declared explicitly
+    # for actions/checkout to work on private forks.
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install mpy-cross
+        run: pip install mpy-cross==1.27.0.post2
+
+      - name: Run checker on HEAD
+        run: python tools/mpy_compat_check.py --json --output head.json
+
+      - name: Run checker on base branch
+        run: |
+          git checkout ${{ github.event.pull_request.base.sha }}
+          if [ -f tools/mpy_compat_check.py ]; then
+            python tools/mpy_compat_check.py --json --output base.json
+          else
+            echo '{"metadata":{"micropython_version":"1.27","total_files":0,"total_lines":0},"summary":{"files_with_issues":0,"files_clean":0,"total_issues":0,"syntax_errors":0,"pattern_matches":0,"info_issues":0,"warning_issues":0,"compatibility_score_pct":100.0,"issues_per_1000_lines":0.0},"categories":{},"issues":[]}' > base.json
+          fi
+          git checkout ${{ github.event.pull_request.head.sha }}
+
+      - name: Generate diff report
+        run: python tools/mpy_compat_check.py --diff base.json --output report.md
+
+      - name: Post PR comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: micropython-compat
+          path: report.md
