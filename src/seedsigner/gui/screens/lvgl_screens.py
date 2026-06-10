@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import array
 import logging
+import threading
 
 from seedsigner.gui.screens import RET_CODE__BACK_BUTTON, RET_CODE__POWER_BUTTON
 
@@ -26,19 +27,31 @@ _lv = None
 # Global screensaver timeout; set once during init from Controller setting.
 _screensaver_timeout_ms = 0
 
+# Guards the one-time init. ensure_lvgl_runtime() can be called concurrently by
+# the BackgroundImportThread and by the main thread (the first screen render),
+# and lvgl_init()/native_input_init() must not run twice.
+_init_lock = threading.Lock()
+
 
 def ensure_lvgl_runtime():
-    """Import and initialize the LVGL runtime (idempotent)."""
+    """Import and initialize the LVGL runtime (idempotent, thread-safe)."""
     global _lv, _screensaver_timeout_ms
     if _lv is not None:
         return
-    import seedsigner_lvgl as lv
-    lv.lvgl_init(hor_res=240, ver_res=240)
-    lv.native_input_init()
-    _lv = lv
+    with _init_lock:
+        # Re-check now that we hold the lock: another thread may have finished.
+        if _lv is not None:
+            return
+        import seedsigner_lvgl as lv
+        lv.lvgl_init(hor_res=240, ver_res=240)
+        lv.native_input_init()
 
-    from seedsigner.controller import Controller
-    _screensaver_timeout_ms = Controller.get_instance().screensaver_activation_ms
+        from seedsigner.controller import Controller
+        _screensaver_timeout_ms = Controller.get_instance().screensaver_activation_ms
+
+        # Publish _lv last: until it's set, other threads keep waiting on the
+        # lock rather than seeing a partially-initialized runtime.
+        _lv = lv
 
     logger.info("LVGL runtime initialized (screensaver timeout=%dms)",
                 _screensaver_timeout_ms)
@@ -62,17 +75,23 @@ def _translate_event(event):
         ("button_selected", index, label)
         ("topnav_back", -1, "topnav_back")
         ("topnav_power", -1, "topnav_power")
+        ("text_entered", -1, text)            # e.g. confirmed passphrase
 
     SeedSigner return codes:
         int index (0, 1, 2, ...) for button selection
         RET_CODE__BACK_BUTTON (1000) for back
         RET_CODE__POWER_BUTTON (1001) for power
+        str text for a confirmed text-entry screen
     """
-    kind, index, _label = event
+    kind, index, label = event
     if kind == "topnav_back":
         return RET_CODE__BACK_BUTTON
     if kind == "topnav_power":
         return RET_CODE__POWER_BUTTON
+    if kind == "text_entered":
+        # String-valued result (text-entry screens). The entered text rides in
+        # the label slot; hand it back to the caller as the string it is.
+        return label
     return index
 
 
@@ -81,7 +100,12 @@ def run_lvgl_screen(renderer, screen_fn, *args, allow_screensaver=True, **kwargs
 
     Args:
         renderer: The SeedSigner Renderer singleton.
-        screen_fn: An LVGL screen function (e.g. _lv.main_menu_screen).
+        screen_fn: The LVGL screen to run, given as the attribute *name* on the
+            native module (e.g. "main_menu_screen"). Passing the name rather
+            than _lv.<fn> avoids dereferencing _lv before the runtime is
+            initialized — _lv is None until ensure_lvgl_runtime() runs, and the
+            background import thread may not have finished init when the first
+            screen renders. (A callable is still accepted for back-compat.)
         allow_screensaver: If True (default), activate the screensaver after
             the global timeout. Set False for screens that should stay active
             indefinitely (e.g. camera scanning).
@@ -91,6 +115,9 @@ def run_lvgl_screen(renderer, screen_fn, *args, allow_screensaver=True, **kwargs
         A SeedSigner-compatible return code (int or RET_CODE constant).
     """
     ensure_lvgl_runtime()
+    # Resolve a screen passed by name now that _lv is guaranteed initialized.
+    if isinstance(screen_fn, str):
+        screen_fn = getattr(_lv, screen_fn)
     timeout_ms = _screensaver_timeout_ms if allow_screensaver else 0
 
     try:
@@ -137,7 +164,49 @@ def lvgl_main_menu_screen(renderer):
     Returns:
         Button index (0-3) or RET_CODE__POWER_BUTTON.
     """
-    return run_lvgl_screen(renderer, _lv.main_menu_screen)
+    return run_lvgl_screen(renderer, "main_menu_screen")
+
+
+# Maps SeedAddPassphraseScreen's keyboard button-text constants to the LVGL
+# passphrase screen's `initial_mode` values.
+_PASSPHRASE_KEYBOARD_MODES = {
+    "abc": "lower",
+    "ABC": "upper",
+    "123": "digits",
+    "!@#": "symbols",
+    "*[]": "symbols",
+}
+
+
+def lvgl_seed_add_passphrase_screen(renderer, passphrase="", title=None, initial_keyboard="abc"):
+    """Run the LVGL BIP-39 passphrase entry screen.
+
+    Args:
+        passphrase: Text to pre-fill (e.g. when re-editing an existing entry).
+        title: Top-nav title. Defaults to "BIP-39 Passphrase".
+        initial_keyboard: A SeedAddPassphraseScreen.KEYBOARD__*_BUTTON_TEXT
+            value; mapped to the C screen's initial_mode.
+
+    Returns:
+        The entered passphrase string on confirm (may be empty), or
+        RET_CODE__BACK_BUTTON if the user backed out.
+    """
+    cfg = {
+        "top_nav": {
+            "title": title or "BIP-39 Passphrase",
+            "show_back_button": True,
+            "show_power_button": False,
+        },
+        "initial_text": passphrase or "",
+        "initial_mode": _PASSPHRASE_KEYBOARD_MODES.get(initial_keyboard, "lower"),
+    }
+    # The native passphrase binding is METH_VARARGS only (no wait_timeout_ms
+    # kwarg) and rebuilds the screen on each invocation, so it can't ride the
+    # screensaver re-entry path without discarding in-progress text. Run it
+    # without the screensaver; it blocks until the user confirms or backs out.
+    return run_lvgl_screen(
+        renderer, "seed_add_passphrase_screen", cfg, allow_screensaver=False
+    )
 
 
 def lvgl_screensaver_screen(renderer):
@@ -150,6 +219,6 @@ def lvgl_screensaver_screen(renderer):
     and restore the PIL canvas to repaint the display."""
     last_screen = renderer.canvas.copy()
     try:
-        run_lvgl_screen(renderer, _lv.screensaver_screen, allow_screensaver=False)
+        run_lvgl_screen(renderer, "screensaver_screen", allow_screensaver=False)
     finally:
         renderer.show_image(last_screen)

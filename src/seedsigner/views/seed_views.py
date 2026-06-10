@@ -355,22 +355,29 @@ class SeedAddPassphraseView(View):
 
 
     def run(self):
-        passphrase_title=self.seed.passphrase_label
-        ret_dict = self.run_screen(
-            seed_screens.SeedAddPassphraseScreen,
+        from seedsigner.gui.screens.lvgl_screens import lvgl_seed_add_passphrase_screen
+        from seedsigner.gui.renderer import Renderer
+
+        result = lvgl_seed_add_passphrase_screen(
+            Renderer.get_instance(),
             passphrase=self.seed.passphrase,
-            title=passphrase_title,
+            title=self.seed.passphrase_label,
             initial_keyboard=self.initial_keyboard,
         )
 
-        # The new passphrase will be the return value; it might be empty.
-        self.seed.set_passphrase(ret_dict["passphrase"])
-
-        if "is_back_button" in ret_dict or len(self.seed.passphrase) == 0:
+        if result == RET_CODE__BACK_BUTTON:
+            # Unlike the PIL screen, the LVGL back event carries no in-progress
+            # text, so we leave whatever passphrase was already stored on the
+            # seed untouched and let the exit dialog edit/discard/skip it.
             return Destination(SeedAddPassphraseExitDialogView)
-                    
-        else:
-            return Destination(SeedReviewPassphraseView)
+
+        # Otherwise result is the entered passphrase string; it might be empty.
+        self.seed.set_passphrase(result)
+
+        if len(self.seed.passphrase) == 0:
+            return Destination(SeedAddPassphraseExitDialogView)
+
+        return Destination(SeedReviewPassphraseView)
 
 
 
