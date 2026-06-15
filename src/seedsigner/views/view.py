@@ -1,7 +1,6 @@
 import logging
 from dataclasses import dataclass
 from gettext import gettext as _
-from typing import Type
 
 from seedsigner.helpers.l10n import mark_for_translation as _mft
 from seedsigner.gui.components import SeedSignerIconConstants
@@ -109,7 +108,7 @@ class View:
         return self._redirect
 
 
-    def run_screen(self, Screen_cls: Type[BaseScreen], **kwargs) -> int | str:
+    def run_screen(self, Screen_cls: type[BaseScreen], **kwargs) -> int | str:
         """
             Instantiates the provided Screen_cls and runs its interactive display.
             Returns the user's input upon completion.
@@ -129,7 +128,7 @@ class Destination:
         Basic struct to pass back to the Controller to tell it which View the user should
         be presented with next.
     """
-    View_cls: Type[View]                # The target View to route to
+    View_cls: type[View]                # The target View to route to
     view_args: dict = None              # The input args required to instantiate the target View
     skip_current_view: bool = False     # The current View is just forwarding; omit current View from history
     clear_history: bool = False         # Optionally clears the back_stack to prevent "back"
