@@ -1,4 +1,3 @@
-from typing import List
 from seedsigner.models.seed import Seed, ElectrumSeed, InvalidSeedException
 from seedsigner.models.settings_definition import SettingsConstants
 
@@ -6,9 +5,9 @@ from seedsigner.models.settings_definition import SettingsConstants
 
 class SeedStorage:
     def __init__(self) -> None:
-        self.seeds: List[Seed] = []
+        self.seeds: list[Seed] = []
         self.pending_seed: Seed = None
-        self._pending_mnemonic: List[str] = []
+        self._pending_mnemonic: list[str] = []
         self._pending_is_electrum : bool = False
 
 
@@ -35,7 +34,7 @@ class SeedStorage:
         self.pending_seed = None
 
 
-    def validate_mnemonic(self, mnemonic: List[str]) -> bool:
+    def validate_mnemonic(self, mnemonic: list[str]) -> bool:
         try:
             Seed(mnemonic=mnemonic)
         except InvalidSeedException as e:
@@ -49,7 +48,7 @@ class SeedStorage:
     
 
     @property
-    def pending_mnemonic(self) -> List[str]:
+    def pending_mnemonic(self) -> list[str]:
         # Always return a copy so that the internal List can't be altered
         return list(self._pending_mnemonic)
 

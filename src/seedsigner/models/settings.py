@@ -5,8 +5,6 @@ import os
 import pathlib
 import platform
 
-from typing import List
-
 from seedsigner.models.settings_definition import SettingsConstants, SettingsDefinition
 from seedsigner.models.singleton import Singleton
 
@@ -235,7 +233,7 @@ class Settings(Singleton):
         return settings_entry.get_selection_option_display_name_by_value(value=self._data[attr_name])
     
 
-    def get_multiselect_value_display_names(self, attr_name: str) -> List[str]:
+    def get_multiselect_value_display_names(self, attr_name: str) -> list[str]:
         """
             Returns a List of all the selected values' display_names.
         """

@@ -6,7 +6,6 @@ from embit.networks import NETWORKS
 from embit.psbt import PSBT, DerivationPath, InputScope, OutputScope
 from embit.ec import PublicKey
 from io import BytesIO
-from typing import List
 
 from seedsigner.models.seed import Seed
 from seedsigner.models.settings import SettingsConstants
@@ -348,7 +347,7 @@ class PSBTParser():
 
 
     @staticmethod
-    def get_input_fingerprints(psbt: PSBT) -> List[str]:
+    def get_input_fingerprints(psbt: PSBT) -> list[str]:
         """
             Exctracts the fingerprint from each input's derivation path.
 

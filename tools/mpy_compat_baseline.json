@@ -2,7 +2,7 @@
   "_comment": "Per-category CI severity for the MicroPython 1.27 compatibility ratchet. 'warn' = reported as ::warning:: but CI stays green. 'fail' = blocks CI (::error::) on any occurrence outside allowed_files. MONOTONIC: edits may only flip warn->fail or shrink allowed_files, never the reverse (review-enforced). Each mpy/0N PR flips ITS category to 'fail' in the same diff that drives its count to zero. Start state: every category 'warn' (CI green, full inventory visible).",
   "categories": {
     "1":  {"severity": "warn"},
-    "2":  {"severity": "warn"},
+    "2":  {"severity": "fail"},
     "4":  {"severity": "warn"},
     "5":  {"severity": "warn"},
     "6":  {"severity": "warn"},

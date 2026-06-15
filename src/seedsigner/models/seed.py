@@ -6,7 +6,6 @@ import hmac
 from binascii import hexlify
 from embit import bip39, bip32, bip85
 from embit.networks import NETWORKS
-from typing import List
 
 from seedsigner.models.settings import SettingsConstants
 
@@ -20,14 +19,14 @@ class InvalidSeedException(Exception):
 
 class Seed:
     def __init__(self,
-                 mnemonic: List[str] = None,
+                 mnemonic: list[str] = None,
                  passphrase: str = "",
                  wordlist_language_code: str = SettingsConstants.WORDLIST_LANGUAGE__ENGLISH) -> None:
         self._wordlist_language_code = wordlist_language_code
 
         if not mnemonic:
             raise Exception("Must initialize a Seed with a mnemonic List[str]")
-        self._mnemonic: List[str] = unicodedata.normalize("NFKD", " ".join(mnemonic).strip()).split()
+        self._mnemonic: list[str] = unicodedata.normalize("NFKD", " ".join(mnemonic).strip()).split()
 
         self._passphrase: str = ""
         self.set_passphrase(passphrase, regenerate_seed=False)
@@ -37,7 +36,7 @@ class Seed:
 
 
     @staticmethod
-    def get_wordlist(wordlist_language_code: str = SettingsConstants.WORDLIST_LANGUAGE__ENGLISH) -> List[str]:
+    def get_wordlist(wordlist_language_code: str = SettingsConstants.WORDLIST_LANGUAGE__ENGLISH) -> list[str]:
         # TODO: Support other BIP-39 wordlist languages!
         if wordlist_language_code == SettingsConstants.WORDLIST_LANGUAGE__ENGLISH:
             return bip39.WORDLIST
@@ -59,7 +58,7 @@ class Seed:
     
 
     @property
-    def mnemonic_list(self) -> List[str]:
+    def mnemonic_list(self) -> list[str]:
         return self._mnemonic
 
 
@@ -74,7 +73,7 @@ class Seed:
     
 
     @property
-    def mnemonic_display_list(self) -> List[str]:
+    def mnemonic_display_list(self) -> list[str]:
         return unicodedata.normalize("NFC", " ".join(self._mnemonic)).split()
 
 
@@ -107,7 +106,7 @@ class Seed:
 
 
     @property
-    def wordlist(self) -> List[str]:
+    def wordlist(self) -> list[str]:
         return Seed.get_wordlist(self.wordlist_language_code)
 
 
