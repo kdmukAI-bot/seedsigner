@@ -1,7 +1,6 @@
 import os
 import pathlib
 from dataclasses import dataclass
-from typing import Any, List
 
 from seedsigner.helpers.l10n import mark_for_translation as _mft
 
@@ -437,7 +436,7 @@ class SettingsEntry:
     type: str = SettingsConstants.TYPE__ENABLED_DISABLED
     help_text: str = None
     selection_options: list[tuple[str | int], str] = None
-    default_value: Any = None
+    default_value: object = None
 
     def __post_init__(self):
         if self.type == SettingsConstants.TYPE__ENABLED_DISABLED:
@@ -460,7 +459,7 @@ class SettingsEntry:
 
 
     @property
-    def selection_options_display_names(self) -> List[str]:
+    def selection_options_display_names(self) -> list[str]:
         if type(self.selection_options[0]) == tuple:
             return [v[1] for v in self.selection_options]
         else:
@@ -548,7 +547,7 @@ class SettingsDefinition:
     # incompatible prior versions.
     version: int = 1
 
-    settings_entries: List[SettingsEntry] = [
+    settings_entries: list[SettingsEntry] = [
         # General options
 
         SettingsEntry(category=SettingsConstants.CATEGORY__SYSTEM,
@@ -758,7 +757,7 @@ class SettingsDefinition:
 
 
     @classmethod
-    def get_settings_entries(cls, visibility: str = SettingsConstants.VISIBILITY__GENERAL) -> List[SettingsEntry]:
+    def get_settings_entries(cls, visibility: str = SettingsConstants.VISIBILITY__GENERAL) -> list[SettingsEntry]:
         entries = []
         for entry in cls.settings_entries:
             if entry.visibility == visibility:

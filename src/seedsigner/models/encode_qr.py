@@ -4,7 +4,6 @@ from embit import bip32
 from embit.networks import NETWORKS
 from binascii import hexlify
 from dataclasses import dataclass
-from typing import List
 from embit import bip32
 from embit.networks import NETWORKS
 from embit.psbt import PSBT
@@ -85,7 +84,7 @@ class BaseStaticQrEncoder(BaseQrEncoder):
 
 @dataclass
 class SeedQrEncoder(BaseStaticQrEncoder):
-    mnemonic: List[str] = None
+    mnemonic: list[str] = None
     wordlist_language_code: str = SettingsConstants.WORDLIST_LANGUAGE__ENGLISH
 
 

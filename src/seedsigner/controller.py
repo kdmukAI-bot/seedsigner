@@ -24,7 +24,12 @@ logger = logging.getLogger(__name__)
 
 
 
-class BackStack(list[Destination]):
+class BackStack(list):
+    """
+        The Controller's navigation history: an ordered list of `Destination`
+        objects (most-recent last), pushed/popped as the user moves through the
+        view flow. Subclasses `list` only to provide a readable `__repr__`.
+    """
     def __repr__(self):
         if len(self) == 0:
             return "[]"
