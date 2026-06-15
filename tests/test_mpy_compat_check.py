@@ -228,3 +228,21 @@ def test_dirty_categories_are_not_marked_fail():
         if severities.get(cid, {}).get("severity") == "fail":
             offenders.append(cid)
     assert not offenders, f"categories still present in tree but marked `fail`: {sorted(set(offenders))}"
+
+
+# ---------------------------------------------------------------------------
+# Per-stage enforcement proof — mpy/01: type annotations (category 2)
+#
+# Each stage that flips a category to `fail` adds a focused test like this: the
+# baseline enforces the category, the tree is clean of it, and a fresh violation
+# would block CI. Copy it for stages 02-08, swapping the category id and snippet.
+# ---------------------------------------------------------------------------
+
+def test_cat2_type_annotations_enforced(tmp_path):
+    assert _real_severities()["2"]["severity"] == "fail"
+    # the business-logic tree is clean of typing imports / executed generics
+    assert [i for i in _real_tree_issues() if i.category_id == 2] == []
+    # a fresh category-2 violation would block CI under the shipped baseline
+    _, result = _result(tmp_path, "from typing import List\n")
+    exit_code, _ = mpy.evaluate_severity(result, mpy.load_baseline(str(REAL_BASELINE)))
+    assert exit_code == 1
