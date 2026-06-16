@@ -312,3 +312,31 @@ def test_mpy02b_re_and_slice_category_enforced(tmp_path, cat, violation):
     _, result = _result(tmp_path, violation)
     exit_code, _ = mpy.evaluate_severity(result, mpy.load_baseline(str(REAL_BASELINE)))
     assert exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Per-stage marker — mpy/03: the compat package (prerequisite for cat 7)
+#
+# Unlike the stages above, mpy/03 flips NO category — it adds
+# seedsigner/compat/l10n.py, the gettext shim the mpy/05 swap builds on. That
+# stage flips category 7 to `fail` and asserts the tree is CLEAN of it, so the
+# shim — the one legitimate, guarded home for `gettext` — must stay invisible to
+# the checker. It reaches the real module via `__import__("gettext")`, which the
+# category-7 line-pattern doesn't match. This locks that in: a future edit that
+# swapped the shim back to a bare `import gettext` would reappear in the tree
+# scan and silently break the mpy/05 enforcement; here it fails loudly.
+# ---------------------------------------------------------------------------
+
+COMPAT_PACKAGE = REPO_ROOT / "src" / "seedsigner" / "compat"
+
+
+def test_mpy03_compat_package_is_checker_clean():
+    assert COMPAT_PACKAGE.is_dir(), "mpy/03 compat package is missing"
+    issues = []
+    for f in mpy.discover_files(str(COMPAT_PACKAGE)):
+        issues.extend(mpy.scan_file(f, use_mpy_cross=False))
+    assert issues == [], (
+        "compat shims must stay invisible to the checker (reach stdlib via "
+        "__import__, not a bare import): "
+        + str([(i.file_path, i.category_id) for i in issues])
+    )
