@@ -3,7 +3,7 @@ import logging
 import time
 
 from dataclasses import dataclass, field
-from gettext import gettext as _
+from seedsigner.compat.l10n import gettext as _
 from PIL import Image, ImageDraw, ImageColor
 from typing import Any, List, Tuple
 

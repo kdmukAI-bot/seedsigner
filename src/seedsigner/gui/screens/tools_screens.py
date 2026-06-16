@@ -1,7 +1,7 @@
 import time
 
 from dataclasses import dataclass
-from gettext import gettext as _
+from seedsigner.compat.l10n import gettext as _
 from typing import Any
 from PIL.Image import Image
 from seedsigner.gui.renderer import Renderer

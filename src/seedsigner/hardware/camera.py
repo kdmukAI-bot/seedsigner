@@ -1,6 +1,6 @@
 import io
 
-from gettext import gettext as _
+from seedsigner.compat.l10n import gettext as _
 from PIL import Image
 
 from seedsigner.models.settings import Settings, SettingsConstants

@@ -3,7 +3,7 @@ import random
 import time
 
 from dataclasses import dataclass
-from gettext import gettext as _
+from seedsigner.compat.l10n import gettext as _
 
 from seedsigner.gui.components import Fonts, GUIConstants, load_image
 from seedsigner.gui.screens.screen import BaseScreen
