@@ -246,3 +246,37 @@ def test_cat2_type_annotations_enforced(tmp_path):
     _, result = _result(tmp_path, "from typing import List\n")
     exit_code, _ = mpy.evaluate_severity(result, mpy.load_baseline(str(REAL_BASELINE)))
     assert exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Per-stage enforcement proof — mpy/02: stdlib swaps (categories 5, 6, 10, 11, 12)
+#
+# Same shape as the mpy/01 cat-2 proof, parametrized over the categories this
+# stage drives to zero and flips to `fail` (enum, pathlib, importlib, os.fsync,
+# platform): the baseline enforces each, the tree is clean of it, and a fresh
+# violation would block CI. Category 18 (os.path/os.walk/os.environ) is NOT here
+# — its os.environ occurrences are resolved with the gettext swap in mpy/05, so
+# it stays `warn` until then (covered by the data-driven invariants above).
+# ---------------------------------------------------------------------------
+
+# (category_id, fresh_violation_snippet)
+MPY02_ENFORCED = [
+    (5,  "from enum import IntEnum\n"),
+    (6,  "import pathlib\n"),
+    (10, "from importlib import import_module\n"),
+    (11, "os.fsync(f.fileno())\n"),
+    (12, "import platform\n"),
+]
+
+
+@pytest.mark.parametrize("cat,violation", MPY02_ENFORCED,
+                         ids=[f"cat{c}" for c, _ in MPY02_ENFORCED])
+def test_mpy02_stdlib_category_enforced(tmp_path, cat, violation):
+    cid = str(cat)
+    assert _real_severities()[cid]["severity"] == "fail"
+    # the business-logic tree is clean of this category
+    assert [i for i in _real_tree_issues() if i.category_id == cat] == []
+    # a fresh violation of this category would block CI under the shipped baseline
+    _, result = _result(tmp_path, violation)
+    exit_code, _ = mpy.evaluate_severity(result, mpy.load_baseline(str(REAL_BASELINE)))
+    assert exit_code == 1
