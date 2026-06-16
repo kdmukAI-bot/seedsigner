@@ -22,6 +22,25 @@ from seedsigner.models.settings import SettingsConstants
 logger = logging.getLogger(__name__)
 
 
+def _contains_digit_run(text, min_length):
+    """True if `text` contains a run of at least `min_length` consecutive digits.
+
+    Stands in for the SeedQR probe that matched 48–96 consecutive digits — a
+    counted-repetition pattern ({m,n}) that MicroPython's `re` does not support.
+    The original upper bound (96) never affected the boolean (any run of >= 48
+    digits already produced a match), so only the lower bound is enforced here.
+    """
+    run = 0
+    for ch in text:
+        if "0" <= ch <= "9":
+            run += 1
+            if run >= min_length:
+                return True
+        else:
+            run = 0
+    return False
+
+
 
 class DecodeQRStatus:
     """
@@ -346,35 +365,42 @@ class DecodeQR:
             logger.debug(f"segment string: {s}")
             logger.debug(f"segment string length: {len(s)}")
 
+            # MicroPython's `re` supports neither the IGNORECASE flag nor counted
+            # repetitions ({m,n}), so the case-insensitive UR/Specter probes below
+            # are rewritten as `.lower()`-prefixed string checks, case-folded
+            # character classes ([Pp][Oo][Ff]), and explicit length checks. See
+            # the MicroPython 1.27 `re` docs.
+            s_lower = s.lower()
+
             # PSBT
-            if re.search("^UR:CRYPTO-PSBT/", s, re.IGNORECASE):
+            if s_lower.startswith("ur:crypto-psbt/"):
                 return QRType.PSBT__UR2
 
-            elif re.search("^UR:CRYPTO-OUTPUT/", s, re.IGNORECASE):
+            elif s_lower.startswith("ur:crypto-output/"):
                 return QRType.OUTPUT__UR
 
-            elif re.search("^UR:CRYPTO-ACCOUNT/", s, re.IGNORECASE):
+            elif s_lower.startswith("ur:crypto-account/"):
                 return QRType.ACCOUNT__UR
 
-            elif re.search(r'^p(\d+)of(\d+) ([A-Za-z0-9+\/=]+$)', s, re.IGNORECASE): #must be base64 characters only in segment
+            elif re.search(r'^[Pp](\d+)[Oo][Ff](\d+) ([A-Za-z0-9+/=]+$)', s): #must be base64 characters only in segment
                 return QRType.PSBT__SPECTER
 
-            elif re.search("^UR:BYTES/", s, re.IGNORECASE):
+            elif s_lower.startswith("ur:bytes/"):
                 return QRType.BYTES__UR
 
             elif DecodeQR.is_base64_psbt(s):
                 return QRType.PSBT__BASE64
 
-            elif re.search(r"^B\$[2HZ]P[0-9A-Z]{4}", s): # https://github.com/coinkite/BBQr/blob/master/BBQr.md#spliting-the-data
+            elif re.search(r"^B\$[2HZ]P[0-9A-Z][0-9A-Z][0-9A-Z][0-9A-Z]", s): # https://github.com/coinkite/BBQr/blob/master/BBQr.md#spliting-the-data
                 return QRType.PSBT__BBQR
 
             # Wallet Descriptor
             desc_str = s.replace("\n","").replace(" ","")
-            if re.search(r'^p(\d+)of(\d+) ', s, re.IGNORECASE):
+            if re.search(r'^[Pp](\d+)[Oo][Ff](\d+) ', s):
                 # when not a SPECTER Base64 PSBT from above, assume it's json
                 return QRType.WALLET__SPECTER
 
-            elif re.search(r'^\{\"label\".*\"descriptor\"\:.*', desc_str, re.IGNORECASE):
+            elif re.search(r'^\{"label".*"descriptor":', desc_str.lower()):
                 # if json starting with label and contains descriptor, assume specter wallet json
                 return QRType.WALLET__SPECTER
 
@@ -385,7 +411,7 @@ class DecodeQR:
                 return QRType.WALLET__GENERIC
 
             # Seed
-            if re.search(r'\d{48,96}', s):
+            if _contains_digit_run(s, 48):
                 return QRType.SEED__SEEDQR
 
             # Bitcoin Address
@@ -490,7 +516,8 @@ class DecodeQR:
             
         long_value = 0
         power_of_base = 1
-        for c in v[::-1]:
+        # reversed(v), not v[::-1]: MicroPython does not implement step != 1 slices
+        for c in reversed(v):
             digit = chars.find(bytes([c]))
             if digit == -1:
                 raise Exception('Forbidden character {} for base {}'.format(c, 43))
@@ -516,12 +543,15 @@ class DecodeQR:
 
     @staticmethod
     def is_bitcoin_address(s):
-        if re.search(r'^bitcoin\:.*', s, re.IGNORECASE):
+        if s.lower().startswith("bitcoin:"):
             return True
-        elif re.search(r'^((bc1|tb1|bcr|[123]|[mn])[a-zA-HJ-NP-Z0-9]{25,62})$', s, re.IGNORECASE):
-            return True
-        else:
-            return False
+        # MicroPython's `re` lacks the IGNORECASE flag and counted repetitions, so
+        # the case-insensitive HRPs are written as case-folded classes, the address
+        # body (which under the original IGNORECASE accepted every ASCII letter —
+        # the a-z range pulled I/O back in via case-folding) is `[A-Za-z0-9]`, and
+        # the {25,62} length bound is checked in Python.
+        match = re.search(r'^([Bb][Cc]1|[Tt][Bb]1|[Bb][Cc][Rr]|[123]|[MmNn])([A-Za-z0-9]+)$', s)
+        return match != None and 25 <= len(match.group(2)) <= 62
 
 
     @staticmethod
@@ -709,13 +739,13 @@ class SpecterPsbtQrDecoder(BaseAnimatedQrDecoder):
 
 
     def current_segment_num(self, segment) -> int:
-        if re.search(r'^p(\d+)of(\d+) ', segment, re.IGNORECASE) != None:
-            return int(re.search(r'^p(\d+)of(\d+) ', segment, re.IGNORECASE).group(1))
+        if re.search(r'^[Pp](\d+)[Oo][Ff](\d+) ', segment) != None:
+            return int(re.search(r'^[Pp](\d+)[Oo][Ff](\d+) ', segment).group(1))
 
 
     def total_segment_nums(self, segment) -> int:
-        if re.search(r'^p(\d+)of(\d+) ', segment, re.IGNORECASE) != None:
-            return int(re.search(r'^p(\d+)of(\d+) ', segment, re.IGNORECASE).group(2))
+        if re.search(r'^[Pp](\d+)[Oo][Ff](\d+) ', segment) != None:
+            return int(re.search(r'^[Pp](\d+)[Oo][Ff](\d+) ', segment).group(2))
 
 
     def parse_segment(self, segment) -> str:
@@ -1012,18 +1042,28 @@ class BitcoinAddressQrDecoder(BaseSingleFrameQrDecoder):
                     the beginning of the address.
 
             Result will yield the following match groups:
-                * group 1: complete address
-                * group 2: address prefix
+                * group 1: address prefix
+                * group 2: address body (the chars following the prefix)
+
+            MicroPython's `re` lacks the IGNORECASE flag and counted repetitions,
+            so the case-insensitive HRPs are written as case-folded classes and the
+            `[a-zA-HJ-NP-Z0-9]{25,64}` body is matched as `[A-Za-z0-9]+` (that body
+            class under the original IGNORECASE accepted every ASCII letter) then
+            length-bounded in Python. The original `{25,64}` greedily capped the
+            body at 64 chars, and the match is intentionally NOT end-anchored (so
+            trailing `?amount=`-style query params are ignored), so the captured
+            body is sliced to 64 chars to reproduce that cap exactly.
         """
-        address_match = re.search(r'^((bc1q|tb1q|bcrt1q|bc1p|tb1p|bcrt1p|[123]|[mn])[a-zA-HJ-NP-Z0-9]{25,64})', segment.split(":")[-1], re.IGNORECASE)
-        if address_match != None:
-            self.address = address_match.group(1)
+        address_match = re.search(r'^([Bb][Cc]1[Qq]|[Tt][Bb]1[Qq]|[Bb][Cc][Rr][Tt]1[Qq]|[Bb][Cc]1[Pp]|[Tt][Bb]1[Pp]|[Bb][Cc][Rr][Tt]1[Pp]|[123]|[MmNn])([A-Za-z0-9]+)', segment.split(":")[-1])
+        if address_match != None and len(address_match.group(2)) >= 25:
+            addr_prefix_raw = address_match.group(1)
+            self.address = addr_prefix_raw + address_match.group(2)[:64]
             self.complete = True
             self.collected_segments = 1
-            
+
             # Have to handle wallets that uppercase bech32 addresses.
             # Note that it's safe to lowercase the prefix for ALL addr formats.
-            addr_prefix = address_match.group(2).lower()
+            addr_prefix = addr_prefix_raw.lower()
             
             if addr_prefix == "1":
                 # Legacy P2PKH. mainnet
@@ -1125,22 +1165,22 @@ class SpecterWalletQrDecoder(BaseAnimatedQrDecoder):
 
 
     def current_segment_num(self, segment) -> int:
-        if re.search(r'^p(\d+)of(\d+) ', segment, re.IGNORECASE) != None:
-            return int(re.search(r'^p(\d+)of(\d+) ', segment, re.IGNORECASE).group(1))
+        if re.search(r'^[Pp](\d+)[Oo][Ff](\d+) ', segment) != None:
+            return int(re.search(r'^[Pp](\d+)[Oo][Ff](\d+) ', segment).group(1))
         else:
             return 1
 
 
     def total_segment_nums(self, segment) -> int:
-        if re.search(r'^p(\d+)of(\d+) ', segment, re.IGNORECASE) != None:
-            return int(re.search(r'^p(\d+)of(\d+) ', segment, re.IGNORECASE).group(2))
+        if re.search(r'^[Pp](\d+)[Oo][Ff](\d+) ', segment) != None:
+            return int(re.search(r'^[Pp](\d+)[Oo][Ff](\d+) ', segment).group(2))
         else:
             return 1
 
 
     def parse_segment(self, segment) -> str:
         try:
-            return re.search(r'^p(\d+)of(\d+) (.+$)', segment, re.IGNORECASE).group(3)
+            return re.search(r'^[Pp](\d+)[Oo][Ff](\d+) (.+$)', segment).group(3)
         except:
             return segment
 

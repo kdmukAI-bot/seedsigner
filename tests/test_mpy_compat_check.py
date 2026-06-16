@@ -280,3 +280,35 @@ def test_mpy02_stdlib_category_enforced(tmp_path, cat, violation):
     _, result = _result(tmp_path, violation)
     exit_code, _ = mpy.evaluate_severity(result, mpy.load_baseline(str(REAL_BASELINE)))
     assert exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Per-stage enforcement proof — mpy/02b: re features (9) + extended slices (19)
+#
+# Same shape as the mpy/02 proof, for the two categories this stage drives to
+# zero and flips to `fail`: every flavor the re rework removed (counted reps,
+# IGNORECASE / other flags, findall) is one detector under category 9, and
+# `seq[::-1]` is category 19. The baseline enforces each, the tree is clean of
+# it, and a fresh violation would block CI.
+# ---------------------------------------------------------------------------
+
+# (category_id, fresh_violation_snippet)
+MPY02B_ENFORCED = [
+    (9,  're.search(r"a{2,4}", s)\n'),                   # counted repetition
+    (9,  "re.search(pat, s, re.IGNORECASE)\n"),          # unsupported flag
+    (9,  "re.findall(pat, s)\n"),                        # absent function
+    (19, "y = data[::-1]\n"),                            # extended slice
+]
+
+
+@pytest.mark.parametrize("cat,violation", MPY02B_ENFORCED,
+                         ids=[f"cat{c}_{n}" for n, (c, _) in enumerate(MPY02B_ENFORCED)])
+def test_mpy02b_re_and_slice_category_enforced(tmp_path, cat, violation):
+    cid = str(cat)
+    assert _real_severities()[cid]["severity"] == "fail"
+    # the business-logic tree is clean of this category
+    assert [i for i in _real_tree_issues() if i.category_id == cat] == []
+    # a fresh violation of this category would block CI under the shipped baseline
+    _, result = _result(tmp_path, violation)
+    exit_code, _ = mpy.evaluate_severity(result, mpy.load_baseline(str(REAL_BASELINE)))
+    assert exit_code == 1
