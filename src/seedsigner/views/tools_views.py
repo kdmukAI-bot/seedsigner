@@ -3,7 +3,7 @@ import logging
 import os
 import time
 
-from gettext import gettext as _
+from seedsigner.compat.l10n import gettext as _
 
 from seedsigner.gui.components import FontAwesomeIconConstants, GUIConstants, SeedSignerIconConstants, resize_image_to_fill
 from seedsigner.gui.screens import RET_CODE__BACK_BUTTON, ButtonListScreen

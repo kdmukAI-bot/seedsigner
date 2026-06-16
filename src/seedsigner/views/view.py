@@ -1,6 +1,6 @@
 import logging
 from dataclasses import dataclass
-from gettext import gettext as _
+from seedsigner.compat.l10n import gettext as _
 
 from seedsigner.helpers.l10n import mark_for_translation as _mft
 from seedsigner.gui.components import SeedSignerIconConstants

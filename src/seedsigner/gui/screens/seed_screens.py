@@ -3,7 +3,7 @@ import math
 import time
 
 from dataclasses import dataclass
-from gettext import gettext as _
+from seedsigner.compat.l10n import gettext as _
 from PIL import Image, ImageDraw, ImageFilter
 from typing import List
 

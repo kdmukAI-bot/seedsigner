@@ -1,4 +1,4 @@
-from gettext import gettext as _
+from seedsigner.compat.l10n import gettext as _
 
 from seedsigner.models.psbt_parser import PSBTParser
 from seedsigner.models.settings import SettingsConstants

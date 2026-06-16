@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from PIL import Image, ImageDraw, ImageFont
 from typing import Tuple
-from gettext import gettext as _
+from seedsigner.compat.l10n import gettext as _
 
 from seedsigner.gui.components import Fonts, GUIConstants, SeedSignerIconConstants
 from seedsigner.hardware.buttons import HardwareButtonsConstants

@@ -6,7 +6,7 @@
     "4":  {"severity": "warn"},
     "5":  {"severity": "fail"},
     "6":  {"severity": "fail"},
-    "7":  {"severity": "warn"},
+    "7":  {"severity": "fail"},
     "8":  {"severity": "warn"},
     "9":  {"severity": "fail"},
     "10": {"severity": "fail"},

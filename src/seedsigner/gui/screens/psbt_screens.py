@@ -2,8 +2,8 @@ import math
 import time
 
 from dataclasses import dataclass
-from gettext import gettext as _
-from gettext import ngettext
+from seedsigner.compat.l10n import gettext as _
+from seedsigner.compat.l10n import ngettext
 from PIL import Image, ImageDraw, ImageFilter
 
 from seedsigner.gui.components import (BtcAmount, Icon, FontAwesomeIconConstants, IconTextLine, FormattedAddress, GUIConstants, Fonts, SeedSignerIconConstants, TextArea,
