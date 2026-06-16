@@ -529,3 +529,63 @@ def test_bbqr_psbt_p2wsh_qr():
     assert len(tx.outputs) == 1
 
 
+# ---------------------------------------------------------------------------
+# MicroPython `re` rework (mpy/02b): the detectors below dropped re.IGNORECASE
+# (case-folded literals / .lower() prefixes), expanded counted repetitions, and
+# replaced re.findall. These tests pin the case-insensitive behavior that the
+# IGNORECASE flag used to provide, plus the address-length bounds, so a future
+# regex edit cannot silently narrow what is recognized.
+# ---------------------------------------------------------------------------
+
+def test_detect_segment_type_is_case_insensitive():
+    """UR and Specter classification must stay case-insensitive without re.IGNORECASE."""
+    for prefix, expected in [
+        ("ur:crypto-psbt/", QRType.PSBT__UR2),
+        ("ur:crypto-output/", QRType.OUTPUT__UR),
+        ("ur:crypto-account/", QRType.ACCOUNT__UR),
+        ("ur:bytes/", QRType.BYTES__UR),
+    ]:
+        body = prefix + "1-2/SOMECBORDATA"
+        assert DecodeQR.detect_segment_type(body.lower()) == expected
+        assert DecodeQR.detect_segment_type(body.upper()) == expected
+        # mixed case (how a flag-free regex could regress)
+        assert DecodeQR.detect_segment_type(prefix.upper() + "1-2/data") == expected
+
+    # Specter base64 PSBT segment ("pNofM <base64>"), lower and upper "p/of"
+    for seg in ["p1of3 ABCabc123+/=", "P1OF3 ABCabc123+/="]:
+        assert DecodeQR.detect_segment_type(seg) == QRType.PSBT__SPECTER
+
+
+def test_is_bitcoin_address_case_and_length_bounds():
+    # base58 (case-sensitive) and bech32 (case-insensitive) both recognized
+    assert DecodeQR.is_bitcoin_address(legacy_address_mainnet) is True
+    assert DecodeQR.is_bitcoin_address(native_segwit_address_mainnet) is True
+    assert DecodeQR.is_bitcoin_address(native_segwit_address_mainnet.upper()) is True
+    assert DecodeQR.is_bitcoin_address(taproot_address_mainnet.upper()) is True
+    assert DecodeQR.is_bitcoin_address("bitcoin:" + native_segwit_address_mainnet) is True
+    assert DecodeQR.is_bitcoin_address("BITCOIN:" + native_segwit_address_mainnet) is True
+
+    # the original `{25,62}` body bound (end-anchored) is preserved exactly
+    assert DecodeQR.is_bitcoin_address("bc1" + "a" * 25) is True    # lower bound
+    assert DecodeQR.is_bitcoin_address("bc1" + "a" * 62) is True    # upper bound
+    assert DecodeQR.is_bitcoin_address("bc1" + "a" * 24) is False   # too short
+    assert DecodeQR.is_bitcoin_address("bc1" + "a" * 63) is False   # too long
+    assert DecodeQR.is_bitcoin_address("bitcon:" + native_segwit_address_mainnet) is False
+
+
+def test_uppercased_bech32_address_is_parsed_and_normalized():
+    """Wallets that uppercase bech32 addresses must still parse; the {25,64}
+    address-body match and prefix dispatch survived dropping re.IGNORECASE."""
+    cases = [
+        (native_segwit_address_mainnet, SettingsConstants.NATIVE_SEGWIT, SettingsConstants.MAINNET),
+        (taproot_address_mainnet, SettingsConstants.TAPROOT, SettingsConstants.MAINNET),
+        (native_segwit_address_testnet, SettingsConstants.NATIVE_SEGWIT, SettingsConstants.TESTNET),
+    ]
+    for address, script_type, network in cases:
+        d = DecodeQR()
+        d.add_data(address.upper())
+        # bech32 is case-insensitive; the decoder normalizes back to lowercase
+        assert d.get_address() == address
+        assert d.get_address_type() == (script_type, network)
+
+
