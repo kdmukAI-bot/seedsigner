@@ -1,5 +1,4 @@
 import os
-import pathlib
 from dataclasses import dataclass
 
 from seedsigner.helpers.l10n import mark_for_translation as _mft
@@ -192,20 +191,33 @@ class SettingsConstants:
 
         Scans the filesystem to autodiscover which language codes are onboard.
         """
-        # Back out from the models/ dir to reach the seedsigner root
-        models_dir = pathlib.Path(__file__).parent.resolve()
-        seedsigner_root = models_dir.parent.resolve()
+        # Back out from the models/ dir to reach the seedsigner package root.
+        # __file__ is .../seedsigner/models/settings_definition.py; drop the last two
+        # path segments with string ops (os.path / pathlib are absent on MicroPython).
+        seedsigner_root = __file__.rsplit("/", 2)[0]
 
         # Pre-load English since there's no "en" entry in the translations folder; also
         # it should always appear first in the list anyway.
         detected_languages = [(cls.LOCALE__ENGLISH, cls.ALL_LOCALES[cls.LOCALE__ENGLISH])]
 
+        # Autodiscover onboard locales from the fixed l10n/<locale>/LC_MESSAGES/*.mo
+        # layout. os.walk is absent on MicroPython; os.listdir exists on both, so walk
+        # the two known levels explicitly instead.
+        l10n_dir = "/".join([seedsigner_root, "resources", "seedsigner-translations", "l10n"])
         locales_present = set()
-        for root, dirs, files in os.walk(os.path.join(seedsigner_root, "resources", "seedsigner-translations", "l10n")):
-            for file in [f for f in files if f.endswith(".mo")]:
-                # `root` will be [...]seedsigner/resources/seedsigner-translations/l10n/pt_BR/LC_MESSAGES
-                # Isolate the language code from the path
-                locales_present.add(root.rsplit(os.sep, 2)[-2])
+        try:
+            locale_dirs = os.listdir(l10n_dir)
+        except OSError:
+            locale_dirs = []
+        for locale_code in locale_dirs:
+            lc_messages = "/".join([l10n_dir, locale_code, "LC_MESSAGES"])
+            try:
+                entries = os.listdir(lc_messages)
+            except OSError:
+                # Not a locale directory (e.g. a stray file at the l10n/ top level)
+                continue
+            if any(f.endswith(".mo") for f in entries):
+                locales_present.add(locale_code)
 
         for locale in cls.ALL_LOCALES.keys():
             if locale in locales_present:

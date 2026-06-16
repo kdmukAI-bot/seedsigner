@@ -59,13 +59,15 @@ class FlowBasedTestException(Exception):
 
 class BackgroundImportThread(BaseThread):
     def run(self):
-        from importlib import import_module
-
         # import seedsigner.hardware.buttons # slowly imports GPIO along the way
 
         def time_import(module_name):
             last = time.time()
-            import_module(module_name)
+            # __import__ (a builtin) replaces importlib.import_module, which
+            # MicroPython lacks. The return value is unused here — we import
+            # purely to warm the module cache — so returning the top-level
+            # package rather than the submodule is irrelevant.
+            __import__(module_name)
             # print(f"{time.time() - last:0.4f}: {module_name}")
 
         time_import('embit')

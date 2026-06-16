@@ -2,13 +2,20 @@ import gettext
 import logging
 import json
 import os
-import pathlib
-import platform
 
 from seedsigner.models.settings_definition import SettingsConstants, SettingsDefinition
 from seedsigner.models.singleton import Singleton
 
 logger = logging.getLogger(__name__)
+
+
+def _path_exists(path: str) -> bool:
+    """File-existence check that avoids os.path, absent on MicroPython 1.27."""
+    try:
+        os.stat(path)
+        return True
+    except OSError:
+        return False
 
 
 class InvalidSettingsQRData(Exception):
@@ -17,7 +24,7 @@ class InvalidSettingsQRData(Exception):
 
 
 class Settings(Singleton):
-    HOSTNAME = platform.uname()[1]
+    HOSTNAME = os.uname()[1]
     SEEDSIGNER_OS = "seedsigner-os"
     SETTINGS_FILENAME = "/mnt/microsd/settings.json" if HOSTNAME == SEEDSIGNER_OS else "settings.json"
         
@@ -32,17 +39,15 @@ class Settings(Singleton):
             settings._data = SettingsDefinition.get_defaults()
 
             # Read persistent settings file, if it exists
-            if os.path.exists(Settings.SETTINGS_FILENAME):
+            if _path_exists(Settings.SETTINGS_FILENAME):
                 with open(Settings.SETTINGS_FILENAME) as settings_file:
                     settings.update(json.load(settings_file))
 
-            # Setup multilanguage support
-            path = os.path.join(
-                pathlib.Path(__file__).parent.resolve().parent.resolve(),
-                "resources",
-                "seedsigner-translations",
-                "l10n"
-            )
+            # Setup multilanguage support. __file__ is .../seedsigner/models/settings.py;
+            # back out two path segments to reach the seedsigner package root, then build
+            # the l10n path with string ops (os.path / pathlib are absent on MicroPython).
+            package_root = __file__.rsplit("/", 2)[0]
+            path = "/".join([package_root, "resources", "seedsigner-translations", "l10n"])
             gettext.bindtextdomain('messages', localedir=path)
             gettext.textdomain('messages')
 
@@ -133,7 +138,11 @@ class Settings(Singleton):
                 # SeedSignerOS makes removing the microsd possible, flush and then fsync forces persistent settings to disk
                 # without this, recent settings changes could be missing after the microsd card was removed
                 settings_file.flush()
-                os.fsync(settings_file.fileno())
+                # MicroPython 1.27 has no per-fd fsync; call it only where present.
+                # The flush() above still applies on platforms without it.
+                fsync = getattr(os, "fsync", None)
+                if fsync is not None:
+                    fsync(settings_file.fileno())
 
 
     def update(self, new_settings: dict):
@@ -293,7 +302,7 @@ class Settings(Singleton):
                 # - Overwrite settings on the SD?
                 # - Load settings from SD?
                 # if Settings file exists (meaning persistent settings was previously enabled), write out current settings to disk
-                if os.path.exists(Settings.SETTINGS_FILENAME):
+                if _path_exists(Settings.SETTINGS_FILENAME):
                     # enable persistent settings first, then save
                     Settings.get_instance()._data[SettingsConstants.SETTING__PERSISTENT_SETTINGS] = SettingsConstants.OPTION__ENABLED
                     Settings.get_instance().save()

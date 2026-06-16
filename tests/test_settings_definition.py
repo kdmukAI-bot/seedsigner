@@ -1,4 +1,3 @@
-import os
 from unittest.mock import patch
 
 from base import BaseTest
@@ -26,12 +25,18 @@ class TestSettingsDefinition(BaseTest):
         # Should only fail if we've absolutely crushed the global translations!!!
         assert absent_language_code is not None
 
-        root = os.path.join(os.getcwd(), "src", "seedsigner", "resources", "seedsigner-translations", "l10n")
+        # get_detected_languages walks the fixed l10n/<locale>/LC_MESSAGES/*.mo layout
+        # via os.listdir (os.walk is absent on MicroPython). Mock that traversal to
+        # report a tree containing only "en" plus the otherwise-absent language code,
+        # each with a .mo file present.
+        def mocked_listdir(path):
+            if path.endswith("l10n"):
+                return ["en", absent_language_code]
+            if path.endswith("LC_MESSAGES"):
+                return ["messages.po", "messages.mo"]
+            raise FileNotFoundError(path)
 
-        # We're going to mock the `root` results to include the absent language code's .mo file
-        mocked_results = [(os.path.join(root, "en", "LC_MESSAGES"), [], ["messages.po", "messages.mo"])]
-        mocked_results.append((os.path.join(root, absent_language_code, "LC_MESSAGES"), [], ["messages.po", "messages.mo"]))
-        with patch("os.walk", return_value=mocked_results):
+        with patch("os.listdir", side_effect=mocked_listdir):
             # Recheck w/our mocked dir listing:
             detected_languages = [lang_tuple[0] for lang_tuple in SettingsConstants.get_detected_languages()]
             assert absent_language_code in detected_languages
