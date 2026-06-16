@@ -254,9 +254,10 @@ def test_cat2_type_annotations_enforced(tmp_path):
 # Same shape as the mpy/01 cat-2 proof, parametrized over the categories this
 # stage drives to zero and flips to `fail` (enum, pathlib, importlib, os.fsync,
 # platform): the baseline enforces each, the tree is clean of it, and a fresh
-# violation would block CI. Category 18 (os.path/os.walk/os.environ) is NOT here
-# — its os.environ occurrences are resolved with the gettext swap in mpy/05, so
-# it stays `warn` until then (covered by the data-driven invariants above).
+# violation would block CI. Category 18 (os.path/os.walk/os.environ) is NOT here:
+# its os.environ occurrences are resolved by the gettext swap (mpy/04), but the
+# composite category is left `warn` (no single layer owns all of os.path/os.walk/
+# os.environ), so it is tracked by the data-driven invariants above, not a flip.
 # ---------------------------------------------------------------------------
 
 # (category_id, fresh_violation_snippet)
@@ -318,13 +319,13 @@ def test_mpy02b_re_and_slice_category_enforced(tmp_path, cat, violation):
 # Per-stage marker — mpy/03: the compat package (prerequisite for cat 7)
 #
 # Unlike the stages above, mpy/03 flips NO category — it adds
-# seedsigner/compat/l10n.py, the gettext shim the mpy/05 swap builds on. That
+# seedsigner/compat/l10n.py, the gettext shim the mpy/04 swap builds on. That
 # stage flips category 7 to `fail` and asserts the tree is CLEAN of it, so the
 # shim — the one legitimate, guarded home for `gettext` — must stay invisible to
 # the checker. It reaches the real module via `__import__("gettext")`, which the
 # category-7 line-pattern doesn't match. This locks that in: a future edit that
 # swapped the shim back to a bare `import gettext` would reappear in the tree
-# scan and silently break the mpy/05 enforcement; here it fails loudly.
+# scan and silently break the mpy/04 enforcement; here it fails loudly.
 # ---------------------------------------------------------------------------
 
 COMPAT_PACKAGE = REPO_ROOT / "src" / "seedsigner" / "compat"
@@ -340,3 +341,24 @@ def test_mpy03_compat_package_is_checker_clean():
         "__import__, not a bare import): "
         + str([(i.file_path, i.category_id) for i in issues])
     )
+
+
+# ---------------------------------------------------------------------------
+# Per-stage enforcement proof — mpy/04: gettext (category 7)
+#
+# Same shape as the mpy/01/mpy/02 proofs. mpy/04 swaps every `gettext` import in
+# the business-logic tree to `seedsigner.compat.l10n` and flips category 7 to
+# `fail`: the baseline enforces it, the tree is clean of it, and a fresh
+# `from gettext import ...` would block CI. gui/ and hardware/ are swapped to the
+# shim too (one project-wide idiom) but stay excluded from the scan — PIL-bound /
+# off the MicroPython path — so they don't affect the count either way.
+# ---------------------------------------------------------------------------
+
+def test_mpy04_gettext_enforced(tmp_path):
+    assert _real_severities()["7"]["severity"] == "fail"
+    # the business-logic tree is clean of gettext imports
+    assert [i for i in _real_tree_issues() if i.category_id == 7] == []
+    # a fresh category-7 violation would block CI under the shipped baseline
+    _, result = _result(tmp_path, "from gettext import gettext as _\n")
+    exit_code, _ = mpy.evaluate_severity(result, mpy.load_baseline(str(REAL_BASELINE)))
+    assert exit_code == 1

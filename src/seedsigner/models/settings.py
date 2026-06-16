@@ -1,8 +1,8 @@
-import gettext
 import logging
 import json
 import os
 
+from seedsigner.compat.l10n import bindtextdomain, set_locale, textdomain
 from seedsigner.models.settings_definition import SettingsConstants, SettingsDefinition
 from seedsigner.models.singleton import Singleton
 
@@ -48,8 +48,8 @@ class Settings(Singleton):
             # the l10n path with string ops (os.path / pathlib are absent on MicroPython).
             package_root = __file__.rsplit("/", 2)[0]
             path = "/".join([package_root, "resources", "seedsigner-translations", "l10n"])
-            gettext.bindtextdomain('messages', localedir=path)
-            gettext.textdomain('messages')
+            bindtextdomain('messages', localedir=path)
+            textdomain('messages')
 
             # Load default/persistent locale setting
             settings.load_locale()
@@ -263,10 +263,10 @@ class Settings(Singleton):
 
     def load_locale(self):
         locale = self.get_value(SettingsConstants.SETTING__LOCALE)
-        os.environ['LANGUAGE'] = locale
+        set_locale(locale)
 
         # Re-initialize with the new locale
-        print(f"Set LANGUAGE locale to {os.environ['LANGUAGE']}")
+        print(f"Set LANGUAGE locale to {locale}")
 
 
 

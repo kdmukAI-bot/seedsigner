@@ -2,7 +2,7 @@ import datetime
 import time
 
 from dataclasses import dataclass
-from gettext import gettext as _
+from seedsigner.compat.l10n import gettext as _
 from PIL.ImageOps import autocontrast
 from typing import List
 
