@@ -8,7 +8,7 @@
     "6":  {"severity": "fail"},
     "7":  {"severity": "warn"},
     "8":  {"severity": "warn"},
-    "9":  {"severity": "warn"},
+    "9":  {"severity": "fail"},
     "10": {"severity": "fail"},
     "11": {"severity": "fail"},
     "12": {"severity": "fail"},
@@ -18,7 +18,7 @@
     "16": {"severity": "warn"},
     "17": {"severity": "warn"},
     "18": {"severity": "warn"},
-    "19": {"severity": "warn"},
+    "19": {"severity": "fail"},
     "20": {"severity": "warn"},
     "21": {"severity": "warn"},
     "22": {"severity": "warn"}
