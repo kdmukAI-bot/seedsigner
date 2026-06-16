@@ -1,5 +1,4 @@
 import logging
-import os
 import random
 import time
 
@@ -29,7 +28,9 @@ class LogoScreen(BaseScreen):
 
         self.partner_logos: dict = {}
         for partner in self.partners:
-            logo_url = os.path.join("partners", f"{partner}_logo.png")
+            # os.path is absent on MicroPython 1.27; join the relative resource path
+            # with "/" (the only separator these bundled asset paths ever use).
+            logo_url = "/".join(["partners", f"{partner}_logo.png"])
             self.partner_logos[partner] = load_image(logo_url)
 
 
