@@ -1,5 +1,4 @@
 import logging
-from dataclasses import dataclass
 from seedsigner.compat.l10n import gettext as _
 
 from seedsigner.helpers.l10n import mark_for_translation as _mft
@@ -51,9 +50,11 @@ class BackStackView:
 class View:
     def _initialize(self):
         """
-        Whether the View is a regular class initialized by __init__() or a dataclass
-        initialized by __post_init__(), this method will be called to set up the View's
-        instance variables.
+        Sets up the View's shared instance variables. A View that takes no constructor
+        args inherits View.__init__() (which calls this directly); a View that takes args
+        defines an explicit __init__() that assigns them and then calls __post_init__().
+        __post_init__() is the override hook those subclasses extend (via super()) to run
+        their own setup before delegating here.
         """
         # Import here to avoid circular imports
         from seedsigner.controller import Controller
@@ -122,16 +123,20 @@ class View:
 
 
 
-@dataclass
 class Destination:
     """
         Basic struct to pass back to the Controller to tell it which View the user should
         be presented with next.
     """
-    View_cls: type[View]                # The target View to route to
-    view_args: dict = None              # The input args required to instantiate the target View
-    skip_current_view: bool = False     # The current View is just forwarding; omit current View from history
-    clear_history: bool = False         # Optionally clears the back_stack to prevent "back"
+    def __init__(self,
+                 View_cls: type[View],               # The target View to route to
+                 view_args: dict = None,             # The input args required to instantiate the target View
+                 skip_current_view: bool = False,    # The current View is just forwarding; omit current View from history
+                 clear_history: bool = False):       # Optionally clears the back_stack to prevent "back"
+        self.View_cls = View_cls
+        self.view_args = view_args
+        self.skip_current_view = skip_current_view
+        self.clear_history = clear_history
 
 
     def __repr__(self):
@@ -246,7 +251,6 @@ class PowerOptionsView(View):
             return Destination(PowerOffView)
 
 
-@dataclass
 class RestartView(View):
 
     def run(self):
@@ -287,12 +291,13 @@ class PowerOffView(View):
 
 
 
-@dataclass
 class NotYetImplementedView(View):
     """
         Temporary View to use during dev.
     """
-    text: str = _mft("This is still on our to-do list!")
+    def __init__(self, text: str = _mft("This is still on our to-do list!")):
+        self.text = text
+        self.__post_init__()
 
 
     def run(self):
@@ -308,15 +313,23 @@ class NotYetImplementedView(View):
 
 
 
-@dataclass
 class ErrorView(View):
-    title: str = _mft("Error")
-    show_back_button: bool = True
-    status_icon_name: str = SeedSignerIconConstants.ERROR
-    status_headline: str = None
-    text: str = None
-    button_text: str = None
-    next_destination: Destination = None
+    def __init__(self,
+                 title: str = _mft("Error"),
+                 show_back_button: bool = True,
+                 status_icon_name: str = SeedSignerIconConstants.ERROR,
+                 status_headline: str = None,
+                 text: str = None,
+                 button_text: str = None,
+                 next_destination: Destination = None):
+        self.title = title
+        self.show_back_button = show_back_button
+        self.status_icon_name = status_icon_name
+        self.status_headline = status_headline
+        self.text = text
+        self.button_text = button_text
+        self.next_destination = next_destination
+        self.__post_init__()
 
     def run(self):
         self.run_screen(
@@ -332,9 +345,12 @@ class ErrorView(View):
 
 
 
-@dataclass
 class NetworkMismatchErrorView(ErrorView):
-    derivation_path: str = None
+    def __init__(self, derivation_path: str = None):
+        self.derivation_path = derivation_path
+        # ErrorView.__init__ lays down the inherited field defaults, then calls
+        # self.__post_init__() (this override) — preserving "all fields set, then post-init".
+        super().__init__()
 
     def __post_init__(self):
         from seedsigner.views.settings_views import SettingsEntryUpdateSelectionView
@@ -359,9 +375,10 @@ class NetworkMismatchErrorView(ErrorView):
 
 
 
-@dataclass
 class UnhandledExceptionView(View):
-    error: list[str]
+    def __init__(self, error: list[str]):
+        self.error = error
+        self.__post_init__()
 
     def __post_init__(self):
         from seedsigner.hardware.camera import CameraConnectionError
@@ -390,7 +407,6 @@ class UnhandledExceptionView(View):
 
 
 
-@dataclass
 class CameraConnectionErrorView(View):
     def run(self):
         self.run_screen(
@@ -405,11 +421,13 @@ class CameraConnectionErrorView(View):
         return Destination(MainMenuView, clear_history=True)
 
 
-@dataclass
 class OptionDisabledView(View):
     UPDATE_SETTING = ButtonOption("Update setting")
     DONE = ButtonOption("Back to Main Menu")
-    settings_attr: str
+
+    def __init__(self, settings_attr: str):
+        self.settings_attr = settings_attr
+        self.__post_init__()
 
     def __post_init__(self):
         super().__post_init__()

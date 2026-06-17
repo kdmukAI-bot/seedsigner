@@ -2,7 +2,6 @@ import logging
 import random
 import time
 
-from dataclasses import dataclass
 from seedsigner.compat.l10n import gettext as _
 
 from seedsigner.gui.components import Fonts, GUIConstants, load_image
@@ -43,9 +42,10 @@ class LogoScreen(BaseScreen):
 
 
 
-@dataclass
 class OpeningSplashView(View):
-    force_partner_logos: bool|None = None
+    def __init__(self, force_partner_logos: bool | None = None):
+        self.force_partner_logos = force_partner_logos
+        self.__post_init__()
 
     def run(self):
         self.run_screen(
