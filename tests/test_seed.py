@@ -83,3 +83,46 @@ def test_electrum_seed_rejects_most_bip39_mnemonics():
 	mnemonic = "only gain spot output unknown craft simple cram absorb suggest ridge famous".split()
 	Seed(mnemonic)
 	ElectrumSeed(mnemonic)
+
+
+def test_seed_with_ascii_passphrase():
+	"""
+	An ASCII passphrase must derive the canonical BIP-39 seed (Trezor test vector).
+
+	Regression-locks the removal of Unicode (NFKD) normalization: normalization is
+	the identity transform on ASCII, so derivation is byte-for-byte unchanged.
+	"""
+	mnemonic = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about".split()
+	seed = Seed(mnemonic=mnemonic, passphrase="TREZOR")
+	assert seed.seed_bytes == bytes.fromhex(
+		"c55257c360c07c72029aebc1b53c05ed0362ada38ead3e3e9efa3708e5349553"
+		"1f09a6987599d18264c1e1c92f2cf141630c7a3c4ab7c81b2f001698e7463b04"
+	)
+	assert seed.passphrase == "TREZOR"
+	assert seed.passphrase_display == "TREZOR"
+
+
+def test_passphrase_rejects_non_ascii():
+	"""
+	Non-ASCII passphrases are rejected. We no longer NFKD-normalize, and the
+	device keyboard is ASCII-only; this guard backstops a future non-ASCII input
+	silently deriving the wrong seed.
+	"""
+	mnemonic = "obscure bone gas open exotic abuse virus bunker shuffle nasty ship dash".split()
+	with pytest.raises(InvalidSeedException):
+		Seed(mnemonic=mnemonic, passphrase="café")
+
+	seed = Seed(mnemonic=mnemonic)
+	with pytest.raises(InvalidSeedException):
+		seed.set_passphrase("naïve")
+
+	# Electrum path normalizes via normalize_electrum_passphrase, which guards too.
+	electrum_mnemonic = "regular reject rare profit once math fringe chase until ketchup century escape".split()
+	with pytest.raises(InvalidSeedException):
+		ElectrumSeed(mnemonic=electrum_mnemonic, passphrase="café")
+
+
+def test_mnemonic_rejects_non_ascii():
+	"""A non-ASCII mnemonic is rejected at the derivation boundary."""
+	with pytest.raises(InvalidSeedException):
+		Seed(mnemonic=["café"] * 12)

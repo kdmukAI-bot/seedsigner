@@ -267,7 +267,7 @@ These **run without error but can be wrong** — audit by hand / test on MicroPy
 SeedSigner's QR decoder (`models/decode_qr.py`) relies heavily on `IGNORECASE`
 and counted reps — this is the most behavior-sensitive category; cover it with tests.
 
-## E. Bitcoin-critical primitives (crypto)
+## E. Bitcoin-critical primitives (cryptography)
 
 MicroPython core `hashlib` provides only `sha256`/`sha1`/`md5` and **no
 `ripemd160`, `sha512`, `pbkdf2`, `hmac`** ([hashlib](https://docs.micropython.org/en/v1.27.0/library/hashlib.html)).
@@ -280,31 +280,40 @@ MicroPython core `hashlib` provides only `sha256`/`sha1`/`md5` and **no
 | `hmac` (HMAC-SHA512, BIP-32) | embit MicroPython stack (Python `hmac`) | uhashlib lists optimized hmac as TODO; a Python `hmac` covers it. Verify present on the 1.27 build. |
 | `sha256` family | MicroPython `hashlib` | present in core |
 
-So the only genuinely **app-owned** crypto work is:
+So the only genuinely **app-owned** cryptography work is:
 
-### §8 `unicodedata` NFKD/NFC — *Detection: static (import) — correctness: CRITICAL*
-**Why:** no `unicodedata` anywhere (MicroPython core, embit, or uhashlib), and
-**embit does NOT normalize** — `bip39.mnemonic_to_seed` does `mnemonic.encode("utf-8")`
-and expects an already-normalized string. SeedSigner does NFKD/NFC itself
-(`models/seed.py`). NFKD is **required for correct BIP-39 seed derivation** — wrong
-normalization → wrong keys.
-**Fix:** provide NFKD/NFC (pure-Python table or a small c-module) and **validate
-against BIP-39 test vectors, including non-ASCII passphrases**, before relying on it.
+### §8 `unicodedata` NFKD/NFC — *Detection: static (import) — RESOLVED by removal*
+**Why it existed:** no `unicodedata` anywhere (MicroPython core, embit, or uhashlib),
+and **embit does NOT normalize** — `bip39.mnemonic_to_seed` does
+`mnemonic.encode("utf-8")` and expects an already-normalized string, so SeedSigner
+used to NFKD/NFC itself in `models/seed.py`.
+**Resolution — removal, not a shim.** SeedSigner's input domain is ASCII: the BIP-39
+passphrase keyboard offers only ASCII characters, and the only supported wordlist is
+English (ASCII). Unicode normalization is the **identity transform on ASCII**, so the
+`unicodedata.normalize` calls in `models/seed.py` and `helpers/mnemonic_generation.py`
+are deleted. `Seed._require_ascii()` backstops the seed-derivation boundary, raising on
+any non-ASCII passphrase or mnemonic — without normalization, a non-ASCII input would
+silently derive the *wrong* keys, so this fails loud instead. No NFKD table or c-module
+is shipped. If extended-charset passphrases or a non-ASCII wordlist are ever added,
+normalization becomes mandatory again and belongs in **embit** (the BIP-39 library that
+punted it to the caller), not the app — see the integration tracking doc.
 
-### §14 `base64` / base32 — *Detection: static*
+### §14 `base64` / base32 — *Detection: static — RESOLVED via `compat.base64`*
 **Why:** no `base64` module; base64 *encode/decode* is available via
 `binascii.a2b_base64`/`b2a_base64`, but **base32 is absent** everywhere
 ([binascii](https://docs.micropython.org/en/v1.27.0/library/binascii.html)).
-```python
-# ❌  from base64 import b32decode      # (one call site: decode_qr.py)
-# ✅  binascii.a2b_base64 / b2a_base64  for base64; small pure-Python base32 helper
-```
+**Resolution:** `seedsigner/compat/base64.py` — `b64encode`/`b64decode` over `binascii`
+(stripping the trailing newline `b2a_base64` adds) plus a small pure-Python `b32decode`
+for the one call site (BBQR in `decode_qr.py`; `b32encode` was unused and dropped). The
+real `base64` is used on CPython, so Pi Zero is byte-for-byte unchanged.
 
-### §15 `hmac` — *Detection: static*
-**Why:** no `hmac` module in core. embit's BIP-32 already uses `hmac` on
-MicroPython, so the embit stack provides it — **rely on the same module rather
-than reimplementing; verify it is present on the 1.27 build** (embit's compat may
-predate 1.27).
+### §15 `hmac` — *Detection: static — RESOLVED via `compat.hmac`*
+**Why:** no `hmac` module in core. embit's BIP-32 already uses `hmac` on MicroPython, so
+the embit stack provides it — rely on the same module rather than reimplementing.
+**Resolution:** `seedsigner/compat/hmac.py` — a one-shot `digest(key, msg, digestmod)`
+that delegates to the real `hmac.digest()` on CPython and falls back to
+`hmac.new(...).digest()` (embit's port may expose only the constructor). **Verify embit's
+`hmac` is importable on the 1.27 firmware build** (its compat may predate 1.27).
 
 ## F. Third-party dependencies
 
