@@ -1,7 +1,6 @@
 import logging
 import os
 import time
-import traceback
 
 from embit.descriptor import Descriptor
 from embit.psbt import PSBT
@@ -329,8 +328,8 @@ class Controller(Singleton):
 
                 except Exception as e:
                     # Display user-friendly error screen w/debugging info
-                    import traceback
-                    traceback.print_exc()
+                    from seedsigner.compat.traceback import print_exception
+                    print_exception(e)
                     next_destination = self.handle_exception(e)
 
                 if not next_destination:
@@ -442,13 +441,16 @@ class Controller(Singleton):
                 * python file, line num, method name
                 * Exception message
         """
+        from seedsigner.compat.traceback import format_exception
         from seedsigner.views.view import UnhandledExceptionView
         logger.exception(e)
+
+        formatted_lines = format_exception(e).splitlines()
 
         # The final exception output line is:
         # "foo.bar.ExceptionType: The exception message"
         # So we extract the Exception type and trim off any "foo.bar." namespacing:
-        last_line = traceback.format_exc().splitlines()[-1]
+        last_line = formatted_lines[-1]
         exception_type = last_line.split(":")[0].split(".")[-1]
 
         # Extract the error message, if there is one
@@ -459,8 +461,8 @@ class Controller(Singleton):
 
         # Scan for the last debugging line that includes a line number reference
         line_info = None
-        for i in range(len(traceback.format_exc().splitlines()) - 1, 0, -1):
-            traceback_line = traceback.format_exc().splitlines()[i]
+        for i in range(len(formatted_lines) - 1, 0, -1):
+            traceback_line = formatted_lines[i]
             if ", line " in traceback_line:
                 line_info = traceback_line.split("/")[-1].replace("\"", "").replace("line ", "")
                 break

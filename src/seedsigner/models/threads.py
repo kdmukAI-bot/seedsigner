@@ -1,5 +1,5 @@
 import logging
-from threading import Thread, Lock
+from seedsigner.compat.threading import Thread, Lock
 
 logger = logging.getLogger(__name__)
 

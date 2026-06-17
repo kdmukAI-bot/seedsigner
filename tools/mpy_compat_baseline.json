@@ -3,7 +3,7 @@
   "categories": {
     "1":  {"severity": "warn"},
     "2":  {"severity": "fail"},
-    "4":  {"severity": "warn"},
+    "4":  {"severity": "fail"},
     "5":  {"severity": "fail"},
     "6":  {"severity": "fail"},
     "7":  {"severity": "fail"},
@@ -12,7 +12,7 @@
     "10": {"severity": "fail"},
     "11": {"severity": "fail"},
     "12": {"severity": "fail"},
-    "13": {"severity": "warn"},
+    "13": {"severity": "fail"},
     "14": {"severity": "warn"},
     "15": {"severity": "warn"},
     "16": {"severity": "warn"},

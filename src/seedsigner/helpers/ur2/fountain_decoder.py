@@ -337,5 +337,5 @@ class FountainDecoder:
             print(f"{original_metric*100.0:5.1f}% | {guesstimate*100.0:5.1f}% | done: {num_complete:2d}, mixed: {len(mixed_set):2d}, queued: {queued}, frames: {self.processed_parts_count:2d} | {mixed_s}")
 
         except Exception as e:
-            import traceback
-            traceback.print_exc()
+            from seedsigner.compat.traceback import print_exception
+            print_exception(e)

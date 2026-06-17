@@ -2,7 +2,7 @@
 import logging
 from picamera.array import PiRGBArray
 from picamera import PiCamera
-from threading import Thread
+from seedsigner.compat.threading import Thread
 import time
 
 logger = logging.getLogger(__name__)
