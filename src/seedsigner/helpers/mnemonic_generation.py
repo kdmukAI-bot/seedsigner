@@ -1,5 +1,4 @@
 import hashlib
-import unicodedata
 
 from embit import bip39
 from seedsigner.models.settings_definition import SettingsConstants
@@ -46,7 +45,10 @@ def calculate_checksum(mnemonic: list | str, wordlist_language_code: str = Setti
     # Convert the resulting mnemonic to bytes, but we `ignore_checksum` validation
     # because we assume it's incorrect since we either let the user select their own
     # final word OR we injected the 0000 word from the wordlist.
-    mnemonic_bytes = bip39.mnemonic_to_bytes(unicodedata.normalize("NFKD", " ".join(mnemonic_copy)), ignore_checksum=True, wordlist=Seed.get_wordlist(wordlist_language_code))
+    # No Unicode normalization: BIP-39 wordlists supported here are English (ASCII),
+    # where NFKD is a no-op. The resulting Seed enforces ASCII at the derivation
+    # boundary (see Seed._require_ascii).
+    mnemonic_bytes = bip39.mnemonic_to_bytes(" ".join(mnemonic_copy), ignore_checksum=True, wordlist=Seed.get_wordlist(wordlist_language_code))
 
     # This function will convert the bytes back into a mnemonic, but it will also
     # calculate the proper checksum bits while doing so. For a 12-word seed it will just

@@ -20,6 +20,11 @@ Currently:
   * ``traceback`` — ``format_exception``/``print_exception`` over
     ``sys.print_exception`` (no ``traceback`` module on-device); the real
     ``traceback`` on CPython.
+  * ``base64`` — ``b64encode``/``b64decode`` over ``binascii`` and a small
+    pure-Python ``b32decode`` (no ``base64`` module on-device, and base32 is
+    absent from ``binascii`` too); the real ``base64`` on CPython.
+  * ``hmac`` — a one-shot ``digest()`` over the embit MicroPython stack's
+    ``hmac`` (no ``hmac`` in core); the real ``hmac`` on CPython.
 
 (``logging`` is NOT here: it is a required frozen ``micropython-lib`` dependency
 the app imports directly — see ``docs/micropython_compatibility.md`` §3.)
