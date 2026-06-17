@@ -3,7 +3,7 @@ import math
 from embit import bip32
 from embit.networks import NETWORKS
 from binascii import hexlify
-from dataclasses import dataclass
+from collections import namedtuple
 from embit import bip32
 from embit.networks import NETWORKS
 from embit.psbt import PSBT
@@ -18,12 +18,38 @@ from urtypes.crypto import Account, HDKey, Output, Keypath, PathComponent, SCRIP
 
 
 
-@dataclass
+XpubData = namedtuple("XpubData", ["root", "xpub", "xpubstring"])
+
+
+def build_xpub_data(seed, derivation, network, sig_type) -> XpubData:
+    """
+    Derive the transport-agnostic xpub material shared by every xpub QR encoder: the
+    BIP32 root key, the derived public key, and the `[fingerprint/derivation]xpub`
+    descriptor string. Returned as an immutable record so each encoder can serialize it
+    in its own QR format.
+    """
+    version = seed.detect_version(derivation, network, sig_type)
+    root = bip32.HDKey.from_seed(
+        seed.seed_bytes,
+        version=NETWORKS[SettingsConstants.map_network_to_embit(network)]["xprv"],
+    )
+    fingerprint = root.child(0).fingerprint
+    xprv = root.derive(derivation)
+    xpub = xprv.to_public()
+    xpub_base58 = xpub.to_string(version=version)
+    xpubstring = "[{}{}]{}".format(
+        hexlify(fingerprint).decode("utf-8"),
+        derivation[1:],
+        xpub_base58,
+    )
+    return XpubData(root=root, xpub=xpub, xpubstring=xpubstring)
+
+
+
 class BaseQrEncoder:
-    qr_density: str = SettingsConstants.DENSITY__MEDIUM
-
-
-    def __post_init__(self):
+    def __init__(self, qr_density: str = SettingsConstants.DENSITY__MEDIUM, **kwargs):
+        self.qr_density = qr_density
+        super().__init__(**kwargs)
         self.qr = QR()
 
 
@@ -66,7 +92,6 @@ class BaseQrEncoder:
 """**************************************************************************************
     STATIC QR encoders
 **************************************************************************************"""
-@dataclass
 class BaseStaticQrEncoder(BaseQrEncoder):
     def seq_len(self):
         return 1
@@ -82,15 +107,15 @@ class BaseStaticQrEncoder(BaseQrEncoder):
 
 
 
-@dataclass
 class SeedQrEncoder(BaseStaticQrEncoder):
-    mnemonic: list[str] = None
-    wordlist_language_code: str = SettingsConstants.WORDLIST_LANGUAGE__ENGLISH
-
-
-    def __post_init__(self):
+    def __init__(self,
+                 mnemonic: list[str] = None,
+                 wordlist_language_code: str = SettingsConstants.WORDLIST_LANGUAGE__ENGLISH,
+                 **kwargs):
+        self.mnemonic = mnemonic
+        self.wordlist_language_code = wordlist_language_code
         self.wordlist = Seed.get_wordlist(self.wordlist_language_code)
-        super().__post_init__()
+        super().__init__(**kwargs)
 
         self.data = ""
         # Output as Numeric data format
@@ -104,7 +129,6 @@ class SeedQrEncoder(BaseStaticQrEncoder):
 
 
 
-@dataclass
 class CompactSeedQrEncoder(SeedQrEncoder):
     def next_part(self):
         # Output as binary data format
@@ -135,61 +159,42 @@ class CompactSeedQrEncoder(SeedQrEncoder):
 
 
 
-@dataclass
 class GenericStaticQrEncoder(BaseStaticQrEncoder):
-    data: str = None
+    def __init__(self, data: str = None, **kwargs):
+        self.data = data
+        super().__init__(**kwargs)
 
     def next_part(self):
         return self.data
 
 
 
-@dataclass
-class BaseXpubQrEncoder(BaseQrEncoder):
-    """
-    Base Xpub QrEncoder for static and animated formats
-    """
-    seed: Seed = None
-    derivation: str = None
-    network: str = SettingsConstants.MAINNET
-    sig_type : str = None
-
-    def prep_xpub(self):
-            
-        version = self.seed.detect_version(self.derivation, self.network, self.sig_type)
-        self.root = bip32.HDKey.from_seed(self.seed.seed_bytes, version=NETWORKS[SettingsConstants.map_network_to_embit(self.network)]["xprv"])
-        self.fingerprint = self.root.child(0).fingerprint
-        self.xprv = self.root.derive(self.derivation)
-        self.xpub = self.xprv.to_public()
-        self.xpub_base58 = self.xpub.to_string(version=version)
-
-        self.xpubstring = "[{}{}]{}".format(
-            hexlify(self.fingerprint).decode('utf-8'),
-            self.derivation[1:],
-            self.xpub_base58
-        )
-
-
-
-class StaticXpubQrEncoder(BaseXpubQrEncoder, BaseStaticQrEncoder):
-    def __post_init__(self):
-        super().__post_init__()
-        self.prep_xpub()
+class StaticXpubQrEncoder(BaseStaticQrEncoder):
+    def __init__(self,
+                 seed: Seed = None,
+                 derivation: str = None,
+                 network: str = SettingsConstants.MAINNET,
+                 sig_type: str = None,
+                 **kwargs):
+        self.seed = seed
+        self.derivation = derivation
+        self.network = network
+        self.sig_type = sig_type
+        super().__init__(**kwargs)
+        self.xpub_data = build_xpub_data(seed, derivation, network, sig_type)
 
 
     def next_part(self):
-        self.prep_xpub()
-        return self.xpubstring
+        return self.xpub_data.xpubstring
 
 
 
 """**************************************************************************************
     Simple animated QR encoders
 **************************************************************************************"""
-@dataclass
 class BaseSimpleAnimatedQREncoder(BaseQrEncoder):
-    def __post_init__(self):
-        super().__post_init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
         self.parts = []
         self.part_num_sent = 0
         self.sent_complete = False
@@ -236,12 +241,24 @@ class BaseSimpleAnimatedQREncoder(BaseQrEncoder):
 
 
 
-@dataclass
-class SpecterLegacyXPubQrEncoder(BaseSimpleAnimatedQREncoder, BaseXpubQrEncoder):
+class SpecterLegacyXPubQrEncoder(BaseSimpleAnimatedQREncoder):
     """
     Legacy "pXofY" format. Included here for compatibility with much older versions of
     Specter Desktop. Can probably eventually be removed.
     """
+    def __init__(self,
+                 seed: Seed = None,
+                 derivation: str = None,
+                 network: str = SettingsConstants.MAINNET,
+                 sig_type: str = None,
+                 **kwargs):
+        self.seed = seed
+        self.derivation = derivation
+        self.network = network
+        self.sig_type = sig_type
+        super().__init__(**kwargs)
+
+
     @property
     def qr_max_fragment_size(self):
         density_mapping = {
@@ -253,23 +270,23 @@ class SpecterLegacyXPubQrEncoder(BaseSimpleAnimatedQREncoder, BaseXpubQrEncoder)
 
 
     def _create_parts(self):
-        self.prep_xpub()
+        xpubstring = build_xpub_data(self.seed, self.derivation, self.network, self.sig_type).xpubstring
         start = 0
         stop = self.qr_max_fragment_size
-        qr_cnt = ((len(self.xpubstring)-1) // self.qr_max_fragment_size) + 1
+        qr_cnt = ((len(xpubstring)-1) // self.qr_max_fragment_size) + 1
 
         if qr_cnt == 1:
-            self.parts.append(self.xpubstring[start:stop])
+            self.parts.append(xpubstring[start:stop])
 
         cnt = 0
         while cnt < qr_cnt and qr_cnt != 1:
-            part = "p" + str(cnt+1) + "of" + str(qr_cnt) + " " + self.xpubstring[start:stop]
+            part = "p" + str(cnt+1) + "of" + str(qr_cnt) + " " + xpubstring[start:stop]
             self.parts.append(part)
 
             start = start + self.qr_max_fragment_size
             stop = stop + self.qr_max_fragment_size
-            if stop > len(self.xpubstring):
-                stop = len(self.xpubstring)
+            if stop > len(xpubstring):
+                stop = len(xpubstring)
             cnt += 1
 
 
@@ -277,12 +294,11 @@ class SpecterLegacyXPubQrEncoder(BaseSimpleAnimatedQREncoder, BaseXpubQrEncoder)
 """**************************************************************************************
     Fountain encoded animated QR encoders
 **************************************************************************************"""
-@dataclass
 class BaseFountainQrEncoder(BaseQrEncoder):
-    def __post_init__(self):
-        super().__post_init__()
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
 
-        self.ur2_encode: UREncoder = None
+        self.ur2_encode = None
 
 
     @property
@@ -322,18 +338,27 @@ class BaseFountainQrEncoder(BaseQrEncoder):
 
 
 
-@dataclass
-class UrXpubQrEncoder(BaseFountainQrEncoder, BaseXpubQrEncoder):
-    def __post_init__(self):
-        super().__post_init__()
-        self.prep_xpub()
-        
+class UrXpubQrEncoder(BaseFountainQrEncoder):
+    def __init__(self,
+                 seed: Seed = None,
+                 derivation: str = None,
+                 network: str = SettingsConstants.MAINNET,
+                 sig_type: str = None,
+                 **kwargs):
+        self.seed = seed
+        self.derivation = derivation
+        self.network = network
+        self.sig_type = sig_type
+        super().__init__(**kwargs)
+
+        xd = build_xpub_data(self.seed, self.derivation, self.network, self.sig_type)
+
         def derivation_to_keypath(path: str) -> list:
             arr = path.split("/")
             if arr[0] == "m":
                 arr = arr[1:]
             if len(arr) == 0:
-                return Keypath([],self.root.my_fingerprint, None)
+                return Keypath([],xd.root.my_fingerprint, None)
             if arr[-1] == "":
                 # trailing slash
                 arr = arr[:-1]
@@ -343,19 +368,19 @@ class UrXpubQrEncoder(BaseFountainQrEncoder, BaseXpubQrEncoder):
                     arr[i] = PathComponent(int(e[:-1]), True)
                 else:
                     arr[i] = PathComponent(int(e), False)
-                    
-            return Keypath(arr, self.root.my_fingerprint, len(arr))
-            
+
+            return Keypath(arr, xd.root.my_fingerprint, len(arr))
+
         origin = derivation_to_keypath(self.derivation)
 
-        # Implemts "use_info" member on HDKey class (urtypes/crypto packages-libs folder) construct, 
+        # Implemts "use_info" member on HDKey class (urtypes/crypto packages-libs folder) construct,
         # so if working on TESTNET, Xpub can be exported accordingly. Default case, MAINNET: None value.
         self.use_info = None if self.network == SettingsConstants.MAINNET else CoinInfo(type=None, network=1)
-        
-        self.ur_hdkey = HDKey({ 'key': self.xpub.key.serialize(),
-        'chain_code': self.xpub.chain_code,
+
+        self.ur_hdkey = HDKey({ 'key': xd.xpub.key.serialize(),
+        'chain_code': xd.xpub.chain_code,
         'origin': origin,
-        'parent_fingerprint': self.xpub.fingerprint,
+        'parent_fingerprint': xd.xpub.fingerprint,
         'use_info': self.use_info })
 
         ur_outputs = []
@@ -387,7 +412,7 @@ class UrXpubQrEncoder(BaseFountainQrEncoder, BaseXpubQrEncoder):
             ur_outputs.append(Output([SCRIPT_EXPRESSION_TAG_MAP[403]],self.ur_hdkey))
             ur_outputs.append(Output([SCRIPT_EXPRESSION_TAG_MAP[400]],self.ur_hdkey))
         
-        ur_account = Account(self.root.my_fingerprint, ur_outputs)
+        ur_account = Account(xd.root.my_fingerprint, ur_outputs)
 
         qr_ur_bytes = UR("crypto-account", ur_account.to_cbor())
 
@@ -395,11 +420,9 @@ class UrXpubQrEncoder(BaseFountainQrEncoder, BaseXpubQrEncoder):
 
 
 
-@dataclass
 class UrPsbtQrEncoder(BaseFountainQrEncoder):
-    psbt: PSBT = None
-
-    def __post_init__(self):
-        super().__post_init__()
+    def __init__(self, psbt: PSBT = None, **kwargs):
+        self.psbt = psbt
+        super().__init__(**kwargs)
         qr_ur_bytes = UR("crypto-psbt", UR_PSBT(self.psbt.serialize()).to_cbor())
         self.ur2_encode = UREncoder(ur=qr_ur_bytes, max_fragment_len=self.qr_max_fragment_size)

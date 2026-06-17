@@ -397,3 +397,37 @@ def test_mpy05_threading_traceback_category_enforced(tmp_path, cat, violation):
     _, result = _result(tmp_path, violation)
     exit_code, _ = mpy.evaluate_severity(result, mpy.load_baseline(str(REAL_BASELINE)))
     assert exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Per-stage enforcement proof — mpy/06: dataclasses (category 1)
+#
+# Same shape as the proofs above, for the category this stage drives to zero and
+# flips to `fail`. The MicroPython-targeted keep-set (encode_qr, view,
+# settings_definition, screensaver) is converted from `@dataclass` to explicit
+# `__init__`, so neither category-1 detector — `from dataclasses import ...` nor
+# the `@dataclass` decorator — remains in the scanned tree: the baseline enforces
+# it, the tree is clean of it, and a fresh occurrence of either form blocks CI.
+# gui/ keeps its dataclasses (PIL-bound, deleted wholesale by the LVGL cutover —
+# `@dataclass` is not what makes those screens MicroPython-incompatible) but stays
+# excluded from the scan, so it doesn't affect the count either way.
+# ---------------------------------------------------------------------------
+
+# (category_id, fresh_violation_snippet) — both category-1 detectors
+MPY06_ENFORCED = [
+    (1, "from dataclasses import dataclass\n"),
+    (1, "@dataclass\nclass X:\n    pass\n"),
+]
+
+
+@pytest.mark.parametrize("cat,violation", MPY06_ENFORCED,
+                         ids=[f"cat{c}_{n}" for n, (c, _) in enumerate(MPY06_ENFORCED)])
+def test_mpy06_dataclass_category_enforced(tmp_path, cat, violation):
+    cid = str(cat)
+    assert _real_severities()[cid]["severity"] == "fail"
+    # the business-logic tree is clean of this category
+    assert [i for i in _real_tree_issues() if i.category_id == cat] == []
+    # a fresh violation of this category would block CI under the shipped baseline
+    _, result = _result(tmp_path, violation)
+    exit_code, _ = mpy.evaluate_severity(result, mpy.load_baseline(str(REAL_BASELINE)))
+    assert exit_code == 1
