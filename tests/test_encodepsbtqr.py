@@ -1,6 +1,6 @@
-from seedsigner.models.encode_qr import CompactSeedQrEncoder, SeedQrEncoder, SpecterLegacyXPubQrEncoder, StaticXpubQrEncoder, UrPsbtQrEncoder, UrXpubQrEncoder
+from seedsigner.models.encode_qr import build_xpub_data, CompactSeedQrEncoder, SeedQrEncoder, SpecterLegacyXPubQrEncoder, StaticXpubQrEncoder, UrPsbtQrEncoder, UrXpubQrEncoder
 from embit import psbt
-from binascii import a2b_base64
+from binascii import a2b_base64, hexlify
 
 from seedsigner.models.settings import SettingsConstants
 from seedsigner.models.seed import Seed
@@ -48,6 +48,22 @@ def test_xpub_qr():
                             derivation="m/48h/1h/0h/2h",
                             network=SettingsConstants.TESTNET)
     assert e.next_part() == "[c49122a5/48h/1h/0h/2h]Vpub5mXgECaX5yYDNc5VnUG4jVNptyEg65qUjuofWchQeuMWWiq8rcPBoMxfrVggXj5NJmaNEToWpax8GMMucozvAdqf1bW1JsZsfdBzsK3VUC5"
+
+
+
+def test_build_xpub_data():
+    # build_xpub_data() is the shared seam every xpub encoder routes through, so pin its
+    # contract directly (not just transitively via the encoders). Same vector as
+    # test_xpub_qr: the xpubstring is what the static/Specter encoders emit, and
+    # root/xpub are what UrXpubQrEncoder serializes into the UR crypto-account.
+    seed = Seed("obscure bone gas open exotic abuse virus bunker shuffle nasty ship dash".split(), passphrase="pass")
+    xd = build_xpub_data(seed, "m/48h/1h/0h/2h", SettingsConstants.TESTNET, None)
+
+    assert xd.xpubstring == "[c49122a5/48h/1h/0h/2h]Vpub5mXgECaX5yYDNc5VnUG4jVNptyEg65qUjuofWchQeuMWWiq8rcPBoMxfrVggXj5NJmaNEToWpax8GMMucozvAdqf1bW1JsZsfdBzsK3VUC5"
+    # the fingerprint embedded in the descriptor is derived from the BIP32 root
+    assert hexlify(xd.root.child(0).fingerprint).decode() == "c49122a5"
+    # the public key the UR encoder consumes is populated
+    assert xd.xpub is not None
 
 
 

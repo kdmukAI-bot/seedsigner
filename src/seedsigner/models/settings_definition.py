@@ -1,5 +1,4 @@
 import os
-from dataclasses import dataclass
 
 from seedsigner.helpers.l10n import mark_for_translation as _mft
 
@@ -426,7 +425,6 @@ class SettingsConstants:
 
 
 
-@dataclass
 class SettingsEntry:
     """
         Defines all the parameters for a single settings entry.
@@ -434,21 +432,32 @@ class SettingsEntry:
         * category: Mostly for organizational purposes when displaying options in the
             SettingsQR UI. Potentially an additional sub-level breakout in the menus
             on the device itself, too.
-        
+
         * selection_options: May be specified as a List(Any) or List(tuple(Any, str)).
             The tuple form is to provide a human-readable display_name. Probably all
             entries should shift to using the tuple form.
     """
     # TODO: Handle multi-language `display_name` and `help_text`
-    category: str
-    attr_name: str
-    display_name: str
-    abbreviated_name: str = None
-    visibility: str = SettingsConstants.VISIBILITY__GENERAL
-    type: str = SettingsConstants.TYPE__ENABLED_DISABLED
-    help_text: str = None
-    selection_options: list[tuple[str | int], str] = None
-    default_value: object = None
+    def __init__(self,
+                 category: str,
+                 attr_name: str,
+                 display_name: str,
+                 abbreviated_name: str = None,
+                 visibility: str = SettingsConstants.VISIBILITY__GENERAL,
+                 type: str = SettingsConstants.TYPE__ENABLED_DISABLED,
+                 help_text: str = None,
+                 selection_options: list = None,
+                 default_value: object = None):
+        self.category = category
+        self.attr_name = attr_name
+        self.display_name = display_name
+        self.abbreviated_name = abbreviated_name
+        self.visibility = visibility
+        self.type = type
+        self.help_text = help_text
+        self.selection_options = selection_options
+        self.default_value = default_value
+        self.__post_init__()
 
     def __post_init__(self):
         if self.type == SettingsConstants.TYPE__ENABLED_DISABLED:
