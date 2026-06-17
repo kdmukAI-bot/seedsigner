@@ -362,3 +362,38 @@ def test_mpy04_gettext_enforced(tmp_path):
     _, result = _result(tmp_path, "from gettext import gettext as _\n")
     exit_code, _ = mpy.evaluate_severity(result, mpy.load_baseline(str(REAL_BASELINE)))
     assert exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Per-stage enforcement proof — mpy/05: threading (4) + traceback (13)
+#
+# Same shape as the proofs above, for the two categories this stage drives to
+# zero and flips to `fail`. The business-logic tree now reaches threads through
+# `seedsigner.compat.threading` (Thread/Lock over `_thread`) and tracebacks
+# through `seedsigner.compat.traceback` (format/print_exception over
+# `sys.print_exception`); both `import threading` and `import traceback` (the
+# only two category detectors here) are gone from the scanned tree, so the
+# baseline enforces each, the tree is clean of it, and a fresh violation blocks
+# CI. gui/ and hardware/ are swapped to the shim too (one project-wide idiom)
+# but stay excluded from the scan, so they don't affect the count either way.
+# ---------------------------------------------------------------------------
+
+# (category_id, fresh_violation_snippet)
+MPY05_ENFORCED = [
+    (4,  "import threading\n"),
+    (4,  "from threading import Thread, Lock\n"),
+    (13, "import traceback\n"),
+]
+
+
+@pytest.mark.parametrize("cat,violation", MPY05_ENFORCED,
+                         ids=[f"cat{c}_{n}" for n, (c, _) in enumerate(MPY05_ENFORCED)])
+def test_mpy05_threading_traceback_category_enforced(tmp_path, cat, violation):
+    cid = str(cat)
+    assert _real_severities()[cid]["severity"] == "fail"
+    # the business-logic tree is clean of this category
+    assert [i for i in _real_tree_issues() if i.category_id == cat] == []
+    # a fresh violation of this category would block CI under the shipped baseline
+    _, result = _result(tmp_path, violation)
+    exit_code, _ = mpy.evaluate_severity(result, mpy.load_baseline(str(REAL_BASELINE)))
+    assert exit_code == 1

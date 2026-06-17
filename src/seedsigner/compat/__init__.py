@@ -10,10 +10,19 @@ minimal stub when it is not, selected once at import time via an in-app
 ``try/except ImportError`` that ships in app source and runs unchanged on the
 stock interpreter.
 
-Currently: ``l10n`` (gettext) — a passthrough on-device, where translation is
-handled by the LVGL font/locale seam rather than ``.mo`` catalogs. (``logging``
-is NOT here: it is a required frozen ``micropython-lib`` dependency the app
-imports directly — see ``docs/micropython_compatibility.md`` §3.)
+Currently:
+
+  * ``l10n`` (gettext) — a passthrough on-device, where translation is handled by
+    the LVGL font/locale seam rather than ``.mo`` catalogs.
+  * ``threading`` — ``Thread``/``Lock`` over MicroPython's low-level ``_thread``
+    (the high-level ``threading`` module is absent); the real ``threading`` on
+    CPython, so Pi Zero is unchanged.
+  * ``traceback`` — ``format_exception``/``print_exception`` over
+    ``sys.print_exception`` (no ``traceback`` module on-device); the real
+    ``traceback`` on CPython.
+
+(``logging`` is NOT here: it is a required frozen ``micropython-lib`` dependency
+the app imports directly — see ``docs/micropython_compatibility.md`` §3.)
 
 See ``docs/micropython_compatibility.md`` (the self-documenting checker is its
 companion: ``tools/mpy_compat_check.py``).
