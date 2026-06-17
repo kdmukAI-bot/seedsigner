@@ -431,3 +431,43 @@ def test_mpy06_dataclass_category_enforced(tmp_path, cat, violation):
     _, result = _result(tmp_path, violation)
     exit_code, _ = mpy.evaluate_severity(result, mpy.load_baseline(str(REAL_BASELINE)))
     assert exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Per-stage enforcement proof — mpy/07: cryptography categories (8, 14, 15)
+#
+# Same shape as the proofs above, for the three categories this stage drives to
+# zero and flips to `fail`. Unlike the other layers, category 8 (`unicodedata`)
+# is resolved by REMOVAL, not a shim: the device's input domain is ASCII
+# (passphrase keyboard + English-only BIP-39 wordlist), where NFKD/NFC is a
+# no-op, so the normalize calls in seed.py / mnemonic_generation.py are deleted
+# and a runtime ASCII guard backstops the seed-derivation boundary. Categories
+# 14 (base64/base32) and 15 (hmac) move to `seedsigner.compat.base64` /
+# `seedsigner.compat.hmac`. All three category detectors — `import unicodedata`,
+# `import base64` / `from base64 import ...`, and `import hmac` — are gone from
+# the scanned tree, so the baseline enforces each, the tree is clean of it, and
+# a fresh violation blocks CI. The compat modules reach the real stdlib via
+# __import__, so they stay invisible to the checker (covered by
+# test_mpy03_compat_package_is_checker_clean).
+# ---------------------------------------------------------------------------
+
+# (category_id, fresh_violation_snippet)
+MPY07_ENFORCED = [
+    (8,  "import unicodedata\n"),
+    (14, "import base64\n"),
+    (14, "from base64 import b32decode\n"),
+    (15, "import hmac\n"),
+]
+
+
+@pytest.mark.parametrize("cat,violation", MPY07_ENFORCED,
+                         ids=[f"cat{c}_{n}" for n, (c, _) in enumerate(MPY07_ENFORCED)])
+def test_mpy07_cryptography_category_enforced(tmp_path, cat, violation):
+    cid = str(cat)
+    assert _real_severities()[cid]["severity"] == "fail"
+    # the business-logic tree is clean of this category
+    assert [i for i in _real_tree_issues() if i.category_id == cat] == []
+    # a fresh violation of this category would block CI under the shipped baseline
+    _, result = _result(tmp_path, violation)
+    exit_code, _ = mpy.evaluate_severity(result, mpy.load_baseline(str(REAL_BASELINE)))
+    assert exit_code == 1

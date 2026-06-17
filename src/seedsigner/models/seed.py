@@ -1,12 +1,11 @@
 import logging
-import unicodedata
 import hashlib
-import hmac
 
 from binascii import hexlify
 from embit import bip39, bip32, bip85
 from embit.networks import NETWORKS
 
+from seedsigner.compat.hmac import digest as hmac_digest
 from seedsigner.models.settings import SettingsConstants
 
 logger = logging.getLogger(__name__)
@@ -14,6 +13,23 @@ logger = logging.getLogger(__name__)
 
 class InvalidSeedException(Exception):
     pass
+
+
+def _require_ascii(value: str, label: str) -> None:
+    """Reject non-ASCII input to the seed-derivation path.
+
+    SeedSigner no longer NFKD/NFC-normalizes mnemonics or passphrases: the
+    device's only passphrase source is an ASCII keyboard and the only supported
+    BIP-39 wordlist is English (also ASCII), where Unicode normalization is a
+    provable no-op. This guard is a future-facing safety check — without
+    normalization, a non-ASCII passphrase or mnemonic would silently derive the
+    *wrong* seed. We do not allow any non-ASCII passphrase characters, and are
+    unlikely to add a BIP-39 wordlist that needs them; but if either ever
+    changes, this fails loud here instead of producing wrong keys. (`ord(c)` is
+    used rather than `str.isascii()` to stay portable to MicroPython.)
+    """
+    if any(ord(c) >= 0x80 for c in value):
+        raise InvalidSeedException(f"{label} contains non-ASCII characters")
 
 
 
@@ -26,7 +42,9 @@ class Seed:
 
         if not mnemonic:
             raise Exception("Must initialize a Seed with a mnemonic List[str]")
-        self._mnemonic: list[str] = unicodedata.normalize("NFKD", " ".join(mnemonic).strip()).split()
+        mnemonic_str = " ".join(mnemonic).strip()
+        _require_ascii(mnemonic_str, "Mnemonic")
+        self._mnemonic: list[str] = mnemonic_str.split()
 
         self._passphrase: str = ""
         self.set_passphrase(passphrase, regenerate_seed=False)
@@ -69,12 +87,12 @@ class Seed:
 
     @property
     def mnemonic_display_str(self) -> str:
-        return unicodedata.normalize("NFC", " ".join(self._mnemonic))
-    
+        return " ".join(self._mnemonic)
+
 
     @property
     def mnemonic_display_list(self) -> list[str]:
-        return unicodedata.normalize("NFC", " ".join(self._mnemonic)).split()
+        return list(self._mnemonic)
 
 
     @property
@@ -89,12 +107,13 @@ class Seed:
 
     @property
     def passphrase_display(self):
-        return unicodedata.normalize("NFC", self._passphrase)
+        return self._passphrase
 
 
     def set_passphrase(self, passphrase: str, regenerate_seed: bool = True):
         if passphrase:
-            self._passphrase = unicodedata.normalize("NFKD", passphrase)
+            _require_ascii(passphrase, "Passphrase")
+            self._passphrase = passphrase
         else:
             # Passphrase must always have a string value, even if it's just the empty
             # string.
@@ -177,7 +196,7 @@ class ElectrumSeed(Seed):
         if len(self._mnemonic) != 12:
             raise InvalidSeedException(f"Unsupported Electrum seed length: {len(self._mnemonic)}")
 
-        s = hmac.digest(b"Seed version", self.mnemonic_str.encode('utf8'), hashlib.sha512).hex()
+        s = hmac_digest(b"Seed version", self.mnemonic_str.encode('utf8'), hashlib.sha512).hex()
         prefix = s[0:3]
 
         # only support Electrum Segwit version for now
@@ -203,11 +222,13 @@ class ElectrumSeed(Seed):
 
     @staticmethod
     def normalize_electrum_passphrase(passphrase : str) -> str:
-        passphrase = unicodedata.normalize('NFKD', passphrase)
-        # lower
+        _require_ascii(passphrase, "Passphrase")
+        # NFKD normalization is a no-op on the ASCII-only input the device accepts
+        # (see _require_ascii). Electrum additionally lowercases and collapses
+        # whitespace, both ASCII-safe.
         passphrase = passphrase.lower()
         # normalize whitespaces
-        passphrase = u' '.join(passphrase.split())
+        passphrase = ' '.join(passphrase.split())
         return passphrase
 
 

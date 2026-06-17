@@ -1,4 +1,3 @@
-import base64
 import json
 import logging
 import re
@@ -11,8 +10,8 @@ from pyzbar.pyzbar import ZBarSymbol
 from urtypes.crypto import PSBT as UR_PSBT
 from urtypes.crypto import Account, Output
 from urtypes.bytes import Bytes
-from base64 import b32encode, b32decode
 
+from seedsigner.compat.base64 import b32decode, b64decode, b64encode
 from seedsigner.helpers.ur2.ur_decoder import URDecoder
 from seedsigner.models.qr_type import QRType
 from seedsigner.models.seed import Seed
@@ -478,7 +477,7 @@ class DecodeQR:
     @staticmethod   
     def is_base64(s):
         try:
-            return base64.b64encode(base64.b64decode(s)) == s.encode('ascii')
+            return b64encode(b64decode(s)) == s.encode('ascii')
         except Exception:
             return False
 
