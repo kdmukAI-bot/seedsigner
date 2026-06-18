@@ -334,6 +334,23 @@ Any import not in the known-compatible set (`embit`) is flagged for verification
 `PIL`/`pyzbar`/`qrcode` are informational (being replaced). `urtypes` is pure
 Python and needs a MicroPython smoke test.
 
+### §23 GUI import boundary — `seedsigner.gui.*` PIL coupling — *Detection: static*
+**Why:** importing any `seedsigner.gui` submodule runs `gui/__init__`, which pulls in the
+Pillow-backed renderer; **Pillow is absent** on MicroPython (a third-party package not in the
+[library index](https://docs.micropython.org/en/v1.27.0/library/index.html)). So the shared
+business logic (`views/`, `models/`, `controller`) must **not** import `seedsigner.gui.*` at
+**module level** — the sole PIL-free exception is `seedsigner.gui.constants`. In-method
+(lazy) gui imports are fine and are intentionally **not** flagged.
+```python
+# ❌  module-level import runs gui/__init__ -> pulls in Pillow
+from seedsigner.gui.components import Button
+# ✅  lazy import, inside the method that uses it
+def run(self):
+    from seedsigner.gui.components import Button
+# ✅  constants are PIL-free — safe at module level
+from seedsigner.gui.constants import GUIConstants
+```
+
 ---
 
 # Runtime hazards that the static checker cannot catch
@@ -367,7 +384,7 @@ retained (degraded tracebacks, not a correctness break).
   `--verbose`, `--diff base.json`. Add `--ci` for GitHub annotations + a ratchet
   exit code.
 - **`mpy-cross` (Pass 1)** compiles each file to catch compile-level syntax
-  (§ "Compile-level syntax"); **pattern/AST scan (Pass 2)** detects categories 1–22.
+  (§ "Compile-level syntax"); **pattern/AST scan (Pass 2)** detects categories 1–23.
 - **Ratchet:** `tools/mpy_compat_baseline.json` holds a per-category `severity`.
   `warn` = reported, CI green. `fail` = blocks CI on any occurrence outside that
   category's `allowed_files`. Each migration PR flips its category `warn → fail`

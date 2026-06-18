@@ -7,17 +7,15 @@ from seedsigner.compat.l10n import gettext as _
 
 from embit.descriptor import Descriptor
 
-from seedsigner.gui.components import FontAwesomeIconConstants, SeedSignerIconConstants
-from seedsigner.gui.screens import (RET_CODE__BACK_BUTTON, ButtonListScreen,
-    WarningScreen, DireWarningScreen, seed_screens)
-from seedsigner.gui.screens.screen import ButtonOption, ButtonOptionWithoutTranslation
+from seedsigner.gui.constants import FontAwesomeIconConstants, SeedSignerIconConstants
 from seedsigner.models.encode_qr import CompactSeedQrEncoder, GenericStaticQrEncoder, SeedQrEncoder, SpecterLegacyXPubQrEncoder, StaticXpubQrEncoder, UrXpubQrEncoder
 from seedsigner.models.qr_type import QRType
 from seedsigner.models.seed import Seed
 from seedsigner.models.settings import Settings, SettingsConstants
 from seedsigner.models.settings_definition import SettingsDefinition
 from seedsigner.models.threads import BaseThread, ThreadsafeCounter
-from seedsigner.views.view import NotYetImplementedView, OptionDisabledView, View, Destination, BackStackView, MainMenuView
+from seedsigner.views.view import (BackStackView, ButtonOption, ButtonOptionWithoutTranslation,
+    Destination, MainMenuView, NotYetImplementedView, OptionDisabledView, RET_CODE__BACK_BUTTON, View)
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +34,8 @@ class SeedsMenuView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import ButtonListScreen
+
         if not self.seeds:
             # Nothing to do here unless we have a seed loaded
             return Destination(LoadSeedView, clear_history=True)
@@ -84,6 +84,7 @@ class SeedSelectSeedView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens import seed_screens
         from seedsigner.controller import Controller
         seeds = self.controller.storage.seeds
 
@@ -167,6 +168,8 @@ class LoadSeedView(View):
     CREATE = ButtonOption("Create a seed", SeedSignerIconConstants.PLUS)
 
     def run(self):
+        from seedsigner.gui.screens.screen import ButtonListScreen
+
         button_data = [
             self.SEED_QR,
             self.TYPE_12WORD,
@@ -218,6 +221,8 @@ class SeedMnemonicEntryView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens import seed_screens
+
         ret = self.run_screen(
             seed_screens.SeedMnemonicEntryScreen,
             # TRANSLATOR_NOTE: Inserts the word number (e.g. "Seed Word #6")
@@ -280,6 +285,8 @@ class SeedMnemonicInvalidView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import DireWarningScreen
+
         button_data = [self.EDIT, self.DISCARD]
         selected_menu_num = self.run_screen(
             DireWarningScreen,
@@ -325,6 +332,8 @@ class SeedFinalizeView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens import seed_screens
+
         button_data = [self.FINALIZE]
         self.PASSPHRASE.button_label = self.seed.passphrase_label
         if self.settings.get_value(SettingsConstants.SETTING__PASSPHRASE) != SettingsConstants.OPTION__DISABLED:
@@ -349,13 +358,20 @@ class SeedAddPassphraseView(View):
     """
     initial_keyboard: used by the screenshot generator to render each different keyboard layout.
     """
-    def __init__(self, initial_keyboard: str = seed_screens.SeedAddPassphraseScreen.KEYBOARD__LOWERCASE_BUTTON_TEXT):
+    def __init__(self, initial_keyboard: str = None):
         super().__init__()
+        if initial_keyboard is None:
+            # Resolved lazily so this module stays import-time free of the PIL-backed
+            # seed_screens; KEYBOARD__LOWERCASE_BUTTON_TEXT is just a str constant.
+            from seedsigner.gui.screens.seed_screens import SeedAddPassphraseScreen
+            initial_keyboard = SeedAddPassphraseScreen.KEYBOARD__LOWERCASE_BUTTON_TEXT
         self.initial_keyboard = initial_keyboard
         self.seed = self.controller.storage.get_pending_seed()
 
 
     def run(self):
+        from seedsigner.gui.screens import seed_screens
+
         passphrase_title=self.seed.passphrase_label
         ret_dict = self.run_screen(
             seed_screens.SeedAddPassphraseScreen,
@@ -386,6 +402,8 @@ class SeedAddPassphraseExitDialogView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import WarningScreen
+
         if self.seed.passphrase:
             title = _("Discard passphrase?")
             message = _("Your current passphrase entry will be erased.")
@@ -427,6 +445,8 @@ class SeedReviewPassphraseView(View):
 
     def run(self):
         # Get the before/after fingerprints
+        from seedsigner.gui.screens import seed_screens
+
         network = self.settings.get_value(SettingsConstants.SETTING__NETWORK)
         passphrase = self.seed.passphrase
         fingerprint_with = self.seed.get_fingerprint(network=network)
@@ -471,6 +491,8 @@ class SeedDiscardView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import WarningScreen
+
         button_data = [self.KEEP, self.DISCARD]
 
         fingerprint = self.seed.get_fingerprint(self.settings.get_value(SettingsConstants.SETTING__NETWORK))
@@ -508,6 +530,8 @@ class SeedElectrumMnemonicStartView(View):
     Could be expanded with a follow-up View to specify Electrum seed type.
     """
     def run(self):
+        from seedsigner.gui.screens.screen import WarningScreen
+
         self.run_screen(
                 WarningScreen,
                 title=_("Electrum Warning"),
@@ -541,6 +565,7 @@ class SeedOptionsView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens import seed_screens
         from seedsigner.controller import Controller
         from seedsigner.views.psbt_views import PSBTOverviewView
 
@@ -635,6 +660,8 @@ class SeedBackupView(View):
     
 
     def run(self):
+        from seedsigner.gui.screens.screen import ButtonListScreen
+
         button_data = [self.VIEW_WORDS]
 
         if self.seed.seedqr_supported:
@@ -671,6 +698,8 @@ class SeedExportXpubSigTypeView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import ButtonListScreen
+
         if len(self.settings.get_value(SettingsConstants.SETTING__SIG_TYPES)) == 1:
             # Nothing to select; skip this screen
             return Destination(SeedExportXpubScriptTypeView, view_args={"seed": self.seed, "sig_type": self.settings.get_value(SettingsConstants.SETTING__SIG_TYPES)[0]}, skip_current_view=True)
@@ -698,6 +727,7 @@ class SeedExportXpubScriptTypeView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import ButtonListScreen
         from seedsigner.controller import Controller
         from .tools_views import ToolsAddressExplorerAddressTypeView
         args = {"seed": self.seed, "sig_type": self.sig_type}
@@ -767,6 +797,7 @@ class SeedExportXpubCustomDerivationView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens import seed_screens
         from seedsigner.controller import Controller
         ret = self.run_screen(
             seed_screens.SeedExportXpubCustomDerivationScreen,
@@ -805,6 +836,8 @@ class SeedExportXpubQRFormatView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import ButtonListScreen
+
         args = {
             "seed": self.seed,
             "sig_type": self.sig_type,
@@ -848,6 +881,8 @@ class SeedExportXpubWarningView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import WarningScreen
+
         destination = Destination(
             SeedExportXpubDetailsView,
             view_args={
@@ -895,6 +930,8 @@ class SeedExportXpubDetailsView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens import seed_screens
+
         seed_derivation_override = self.seed.derivation_override(self.sig_type)
         if self.script_type == SettingsConstants.CUSTOM_DERIVATION:
             derivation_path = self.custom_derivation
@@ -1007,6 +1044,8 @@ class SeedWordsWarningView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import DireWarningScreen
+
         destination = Destination(
             SeedWordsView,
             view_args=dict(
@@ -1052,6 +1091,8 @@ class SeedWordsView(View):
 
     def run(self):
         # Slice the mnemonic to our current 4-word section
+        from seedsigner.gui.screens import seed_screens
+
         words_per_page = 4  # TODO: eventually make this configurable for bigger screens?
 
         if self.bip85_data is not None:
@@ -1120,6 +1161,8 @@ class SeedBIP85SelectNumWordsView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import ButtonListScreen
+
         button_data = [self.WORDS_12, self.WORDS_24]
 
         selected_menu_num = self.run_screen(
@@ -1153,6 +1196,8 @@ class SeedBIP85SelectChildIndexView(View):
 
     def run(self):
         # TODO: Change this later to use the generic Screen input keyboard
+        from seedsigner.gui.screens import seed_screens
+
         ret = self.run_screen(seed_screens.SeedBIP85SelectChildIndexScreen)
 
         if ret == RET_CODE__BACK_BUTTON:
@@ -1186,6 +1231,8 @@ class SeedBIP85InvalidChildIndexView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import DireWarningScreen
+
         self.run_screen(
             DireWarningScreen,
             title=_("BIP-85 Index Error"),
@@ -1221,6 +1268,8 @@ class SeedWordsBackupTestPromptView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens import seed_screens
+
         button_data = [self.VERIFY, self.SKIP]
         selected_menu_num = self.run_screen(
             seed_screens.SeedWordsBackupTestPromptScreen,
@@ -1270,6 +1319,7 @@ class SeedWordsBackupTestView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import ButtonListScreen
         from embit import bip39
 
         if self.rand_seed is not None:
@@ -1348,6 +1398,8 @@ class SeedWordsBackupTestMistakeView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import DireWarningScreen
+
         button_data = [self.REVIEW, self.RETRY]
 
         # TRANSLATOR_NOTE: Inserts the word number and the word (e.g. "Word #1 is not "apple"!")
@@ -1426,6 +1478,7 @@ class SeedTranscribeSeedQRFormatView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens import seed_screens
 
         if self.settings.get_value(SettingsConstants.SETTING__COMPACT_SEEDQR) != SettingsConstants.OPTION__ENABLED:
             # Only configured for standard SeedQR
@@ -1480,6 +1533,8 @@ class SeedTranscribeSeedQRWarningView(View):
     
 
     def run(self):
+        from seedsigner.gui.screens.screen import DireWarningScreen
+
         destination = Destination(
             SeedTranscribeSeedQRWholeQRView,
             view_args={
@@ -1518,6 +1573,8 @@ class SeedTranscribeSeedQRWholeQRView(View):
     
 
     def run(self):
+        from seedsigner.gui.screens import seed_screens
+
         encoder_args = dict(mnemonic=self.seed.mnemonic_list,
                             wordlist_language_code=self.settings.get_value(SettingsConstants.SETTING__WORDLIST_LANGUAGE))
         if self.seedqr_format == QRType.SEED__SEEDQR:
@@ -1562,6 +1619,8 @@ class SeedTranscribeSeedQRZoomedInView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens import seed_screens
+
         encoder_args = dict(mnemonic=self.seed.mnemonic_list,
                             wordlist_language_code=self.settings.get_value(SettingsConstants.SETTING__WORDLIST_LANGUAGE))
         if self.seedqr_format == QRType.SEED__SEEDQR:
@@ -1604,6 +1663,8 @@ class SeedTranscribeSeedQRConfirmQRPromptView(View):
     
 
     def run(self):
+        from seedsigner.gui.screens import seed_screens
+
         button_data = [self.SCAN, self.DONE]
 
         selected_menu_option = self.run_screen(
@@ -1665,6 +1726,8 @@ class SeedTranscribeSeedQRConfirmWrongSeedView(View):
     A valid SeedQR was scanned but it did NOT match the one we just transcribed!
     """
     def run(self):
+        from seedsigner.gui.screens.screen import DireWarningScreen
+
         self.run_screen(
             DireWarningScreen,
             title=_("Confirm SeedQR"),
@@ -1686,6 +1749,8 @@ class SeedTranscribeSeedQRConfirmInvalidQRView(View):
     """
     def run(self):
         # TODO: A better error message would be something like: "The QR code you scanned does not contain a valid SeedQR."
+        from seedsigner.gui.screens.screen import DireWarningScreen
+
         self.run_screen(
             DireWarningScreen,
             title=_("Confirm SeedQR"),
@@ -1787,6 +1852,7 @@ class AddressVerificationSigTypeView(View):
     MULTISIG = ButtonOption("Multisig")
 
     def run(self):
+        from seedsigner.gui.screens import seed_screens
         from seedsigner.helpers import embit_utils
         from seedsigner.controller import Controller
         button_data = [self.SINGLE_SIG, self.MULTISIG]
@@ -1885,6 +1951,8 @@ class SeedAddressVerificationView(View):
 
     def run(self):
         # Start brute-force calculations from the zero-th index
+        from seedsigner.gui.screens import seed_screens
+
         try:
             self.addr_verification_thread.start()
 
@@ -2010,6 +2078,8 @@ class SeedAddressVerificationView(View):
 
 class SeedAddressVerificationSuccessView(View):
     def run(self):
+        from seedsigner.gui.screens import seed_screens
+
         self.run_screen(
             seed_screens.SeedAddressVerificationSuccessScreen,
             address = self.controller.unverified_address["address"],
@@ -2026,6 +2096,8 @@ class LoadMultisigWalletDescriptorView(View):
     CANCEL = ButtonOption("Cancel")
 
     def run(self):
+        from seedsigner.gui.screens import seed_screens
+
         button_data = [self.SCAN, self.CANCEL]
         selected_menu_num = self.run_screen(
             seed_screens.LoadMultisigWalletDescriptorScreen,
@@ -2053,6 +2125,8 @@ class MultisigWalletDescriptorView(View):
     OK = ButtonOption("OK")
 
     def run(self):
+        from seedsigner.gui.screens import seed_screens
+
         descriptor = self.controller.multisig_wallet_descriptor
 
         fingerprints = []

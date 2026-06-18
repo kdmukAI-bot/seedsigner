@@ -2,14 +2,73 @@ import logging
 from seedsigner.compat.l10n import gettext as _
 
 from seedsigner.helpers.l10n import mark_for_translation as _mft
-from seedsigner.gui.components import SeedSignerIconConstants
-from seedsigner.gui.screens import RET_CODE__POWER_BUTTON, RET_CODE__BACK_BUTTON
-from seedsigner.gui.screens.screen import BaseScreen, ButtonOption, LargeButtonScreen, WarningScreen, ErrorScreen
+from seedsigner.gui.constants import SeedSignerIconConstants
 from seedsigner.models.settings import Settings, SettingsConstants
 from seedsigner.models.settings_definition import SettingsDefinition
 from seedsigner.models.threads import BaseThread
 
 logger = logging.getLogger(__name__)
+
+
+# Must be huge numbers to avoid conflicting with the selected_button returned by the
+#   screens with buttons.
+RET_CODE__BACK_BUTTON = 1000
+RET_CODE__POWER_BUTTON = 1001
+
+
+
+class ButtonOption:
+    """
+    Note: The babel config in setup.cfg will extract the `button_label` string for translation
+    """
+    def __init__(self,
+                 button_label: str,
+                 icon_name: str = None,
+                 icon_color: str = None,
+                 right_icon_name: str = None,
+                 button_label_color: str = None,
+                 return_data = None,
+                 active_button_label: str = None,  # Changes displayed button label when button is active
+                 font_name: str = None,            # Optional override
+                 font_size: int = None):           # Optional override
+        self.button_label = button_label
+        self.icon_name = icon_name
+        self.icon_color = icon_color
+        self.right_icon_name = right_icon_name
+        self.button_label_color = button_label_color
+        self.return_data = return_data
+        self.active_button_label = active_button_label
+        self.font_name = font_name
+        self.font_size = font_size
+
+
+    def __eq__(self, other):
+        # Formerly a @dataclass; stock MicroPython has no `dataclasses` module. The
+        # synthesized value-equality is load-bearing: the flow-test harness locates a
+        # selection via `button_data.index(ButtonOption(...))`, comparing distinct
+        # instances field-by-field. Defining __eq__ (and leaving __hash__ unset, which
+        # makes instances unhashable) reproduces exactly what @dataclass gave us. The
+        # class-identity guard keeps ButtonOptionWithoutTranslation distinct from
+        # ButtonOption, as the per-class dataclass __eq__ did.
+        if other.__class__ is not self.__class__:
+            return NotImplemented
+        return (
+            self.button_label, self.icon_name, self.icon_color, self.right_icon_name,
+            self.button_label_color, self.return_data, self.active_button_label,
+            self.font_name, self.font_size,
+        ) == (
+            other.button_label, other.icon_name, other.icon_color, other.right_icon_name,
+            other.button_label_color, other.return_data, other.active_button_label,
+            other.font_name, other.font_size,
+        )
+
+
+
+class ButtonOptionWithoutTranslation(ButtonOption):
+    """
+    Same as ButtonOption but does NOT translate button_label or active_button_label.
+    The labels are also not extracted for translation by babel.
+    """
 
 
 
@@ -58,7 +117,7 @@ class View:
         """
         # Import here to avoid circular imports
         from seedsigner.controller import Controller
-        from seedsigner.gui import Renderer
+        from seedsigner.gui.renderer import Renderer
 
         self.controller: Controller = Controller.get_instance()
         self.settings = Settings.get_instance()
@@ -109,7 +168,7 @@ class View:
         return self._redirect
 
 
-    def run_screen(self, Screen_cls: type[BaseScreen], **kwargs) -> int | str:
+    def run_screen(self, Screen_cls, **kwargs) -> int | str:
         """
             Instantiates the provided Screen_cls and runs its interactive display.
             Returns the user's input upon completion.
@@ -233,6 +292,8 @@ class PowerOptionsView(View):
     POWER_OFF = ButtonOption("Power off", SeedSignerIconConstants.POWER)
 
     def run(self):
+        from seedsigner.gui.screens.screen import LargeButtonScreen
+
         button_data = [self.RESET, self.POWER_OFF]
         selected_menu_num = self.run_screen(
             LargeButtonScreen,
@@ -301,6 +362,8 @@ class NotYetImplementedView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import WarningScreen
+
         self.run_screen(
             WarningScreen,
             title=_("Work In Progress"),
@@ -332,6 +395,8 @@ class ErrorView(View):
         self.__post_init__()
 
     def run(self):
+        from seedsigner.gui.screens.screen import ErrorScreen
+
         self.run_screen(
             ErrorScreen,
             title=self.title,
@@ -395,6 +460,8 @@ class UnhandledExceptionView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import ErrorScreen
+
         self.run_screen(
             ErrorScreen,
             title=_("System Error"),
@@ -409,6 +476,8 @@ class UnhandledExceptionView(View):
 
 class CameraConnectionErrorView(View):
     def run(self):
+        from seedsigner.gui.screens.screen import ErrorScreen
+
         self.run_screen(
             ErrorScreen,
             title=_("Hardware Error"),
@@ -440,6 +509,8 @@ class OptionDisabledView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import WarningScreen
+
         button_data = [self.UPDATE_SETTING, self.DONE]
         selected_menu_num = self.run_screen(
             WarningScreen,
@@ -463,6 +534,8 @@ class RemoveMicroSDWarningView(View):
     SETTINGS = ButtonOption("Settings")
 
     def run(self):
+        from seedsigner.gui.screens.screen import WarningScreen
+
         button_data = [self.CONTINUE, self.SETTINGS]
         selected_menu_num = self.run_screen(
             WarningScreen,

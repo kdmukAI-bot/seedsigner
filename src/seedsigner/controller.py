@@ -4,9 +4,6 @@ import time
 
 from embit.descriptor import Descriptor
 from embit.psbt import PSBT
-from PIL.Image import Image
-
-from seedsigner.gui.toast import BaseToastOverlayManagerThread
 from seedsigner.models.psbt_parser import PSBTParser
 from seedsigner.models.seed import Seed
 from seedsigner.models.seed_storage import SeedStorage
@@ -121,8 +118,8 @@ class Controller(Singleton):
 
     multisig_wallet_descriptor: Descriptor = None
 
-    image_entropy_preview_frames: list[Image] = None
-    image_entropy_final_image: Image = None
+    image_entropy_preview_frames = None
+    image_entropy_final_image = None
 
     address_explorer_data: dict = None
 
@@ -141,7 +138,7 @@ class Controller(Singleton):
 
     back_stack: BackStack = None
     screensaver: Screensaver = None
-    toast_notification_thread: BaseToastOverlayManagerThread = None
+    toast_notification_thread = None
 
 
     @classmethod
@@ -407,7 +404,7 @@ class Controller(Singleton):
         HardwareButtons.get_instance().update_last_input_time()
 
 
-    def activate_toast(self, toast_manager_thread: BaseToastOverlayManagerThread):
+    def activate_toast(self, toast_manager_thread):
         """
         Ensures that the Controller has explicit control over which processes get to
         claim the Renderer.lock and which need to (potentially) release it.
