@@ -17,14 +17,14 @@ from seedsigner.models.encode_qr import BaseQrEncoder
 from seedsigner.models.settings import Settings, SettingsConstants
 from seedsigner.models.threads import BaseThread, ThreadsafeCounter
 
+# The button vocabulary (ButtonOption + the RET_CODE__* sentinels) now lives with the
+# business logic in views.view; re-imported here so existing
+# `from seedsigner.gui.screens[.screen] import ButtonOption / RET_CODE__...` callers
+# (and `from .screen import *`) keep working unchanged.
+from seedsigner.views.view import (ButtonOption, ButtonOptionWithoutTranslation,
+    RET_CODE__BACK_BUTTON, RET_CODE__POWER_BUTTON)
+
 logger = logging.getLogger(__name__)
-
-
-# Must be huge numbers to avoid conflicting with the selected_button returned by the
-#   screens with buttons.
-RET_CODE__BACK_BUTTON = 1000
-RET_CODE__POWER_BUTTON = 1001
-
 
 
 @dataclass
@@ -263,32 +263,6 @@ class BaseTopNavScreen(BaseScreen):
 
                 # Write the screen updates
                 self.renderer.show_image()
-
-
-
-@dataclass
-class ButtonOption:
-    """
-    Note: The babel config in setup.cfg will extract the `button_label` string for translation
-    """
-    button_label: str
-    icon_name: str = None
-    icon_color: str = None
-    right_icon_name: str = None
-    button_label_color: str = None
-    return_data: Any = None
-    active_button_label: str = None  # Changes displayed button label when button is active
-    font_name: str = None  # Optional override
-    font_size: int = None  # Optional override
-
-
-
-@dataclass
-class ButtonOptionWithoutTranslation(ButtonOption):
-    """
-    Same as ButtonOption but does NOT translate button_label or active_button_label.
-    The labels are also not extracted for translation by babel.
-    """
 
 
 

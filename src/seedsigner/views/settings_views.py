@@ -1,12 +1,10 @@
 import logging
 from seedsigner.compat.l10n import gettext as _
 
-from seedsigner.gui.components import GUIConstants, SeedSignerIconConstants
-from seedsigner.gui.screens import (RET_CODE__BACK_BUTTON, ButtonListScreen, settings_screens)
-from seedsigner.gui.screens.screen import ButtonOption
+from seedsigner.gui.constants import GUIConstants, SeedSignerIconConstants
 from seedsigner.models.settings import Settings, SettingsConstants, SettingsDefinition
 
-from .view import View, Destination, MainMenuView
+from .view import ButtonOption, Destination, MainMenuView, RET_CODE__BACK_BUTTON, View
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +26,8 @@ class SettingsMenuView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import ButtonListScreen
+
         settings_entries = SettingsDefinition.get_settings_entries(
             visibility=self.visibility
         )
@@ -107,6 +107,8 @@ class SettingsMenuView(View):
 
 class LocaleSelectionView(View):
     def run(self):
+        from seedsigner.gui.screens import settings_screens
+
         cur_language_code = self.settings.get_value(SettingsConstants.SETTING__LOCALE)
 
         selected_button = 0
@@ -162,6 +164,8 @@ class SettingsEntryUpdateSelectionView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens import settings_screens
+
         initial_value = self.settings.get_value(self.settings_entry.attr_name)
         button_data = []
         checked_buttons = []
@@ -342,6 +346,8 @@ class SettingsIngestSettingsQRView(View):
 ****************************************************************************"""
 class IOTestView(View):
     def run(self):
+        from seedsigner.gui.screens import settings_screens
+
         self.run_screen(settings_screens.IOTestScreen)
 
         return Destination(SettingsMenuView)
@@ -350,6 +356,8 @@ class IOTestView(View):
 
 class DonateView(View):
     def run(self):
+        from seedsigner.gui.screens import settings_screens
+
         self.run_screen(settings_screens.DonateScreen)
 
         return Destination(SettingsMenuView)

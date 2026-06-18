@@ -21,6 +21,7 @@
     "19": {"severity": "fail"},
     "20": {"severity": "warn"},
     "21": {"severity": "fail"},
-    "22": {"severity": "warn"}
+    "22": {"severity": "warn"},
+    "23": {"severity": "fail"}
   }
 }

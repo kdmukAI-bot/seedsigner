@@ -5,15 +5,13 @@ import time
 
 from seedsigner.compat.l10n import gettext as _
 
-from seedsigner.gui.components import FontAwesomeIconConstants, GUIConstants, SeedSignerIconConstants, resize_image_to_fill
-from seedsigner.gui.screens import RET_CODE__BACK_BUTTON, ButtonListScreen
-from seedsigner.gui.screens.screen import ButtonOption
+from seedsigner.gui.constants import FontAwesomeIconConstants, GUIConstants, SeedSignerIconConstants
 from seedsigner.helpers import mnemonic_generation
 from seedsigner.models.seed import Seed
 from seedsigner.models.settings_definition import SettingsConstants
 from seedsigner.views.seed_views import SeedDiscardView, SeedFinalizeView, SeedMnemonicEntryView, SeedOptionsView, SeedWordsWarningView, SeedExportXpubScriptTypeView
 
-from .view import View, Destination, BackStackView
+from .view import BackStackView, ButtonOption, Destination, RET_CODE__BACK_BUTTON, View
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +25,8 @@ class ToolsMenuView(View):
     VERIFY_ADDRESS = ButtonOption("Verify address")
 
     def run(self):
+        from seedsigner.gui.screens.screen import ButtonListScreen
+
         button_data = [self.IMAGE, self.DICE, self.KEYBOARD, self.ADDRESS_EXPLORER, self.VERIFY_ADDRESS]
 
         selected_menu_num = self.run_screen(
@@ -78,6 +78,7 @@ class ToolsImageEntropyFinalImageView(View):
     def run(self):
         from PIL import Image
         from PIL.ImageOps import autocontrast
+        from seedsigner.gui.components import resize_image_to_fill
         from seedsigner.gui.screens.tools_screens import ToolsImageEntropyFinalImageScreen
         if not self.controller.image_entropy_final_image:
             from seedsigner.hardware.camera import Camera
@@ -123,6 +124,8 @@ class ToolsImageEntropyMnemonicLengthView(View):
     TWENTYFOUR_WORDS = ButtonOption("24 words", return_data=24)
 
     def run(self):
+        from seedsigner.gui.screens.screen import ButtonListScreen
+
         button_data = [self.TWELVE_WORDS, self.TWENTYFOUR_WORDS]
 
         selected_menu_num = self.run_screen(
@@ -202,6 +205,8 @@ class ToolsImageEntropyMnemonicLengthView(View):
 ****************************************************************************"""
 class ToolsDiceEntropyMnemonicLengthView(View):
     def run(self):
+        from seedsigner.gui.screens.screen import ButtonListScreen
+
         # Since we're dynamically building the ButtonOption button_labels here, it's too
         # awkward to use the usual class-level attr approach.
 
@@ -268,6 +273,8 @@ class ToolsCalcFinalWordNumWordsView(View):
     TWENTY_FOUR = ButtonOption("24 words", return_data=24)
 
     def run(self):
+        from seedsigner.gui.screens.screen import ButtonListScreen
+
         button_data = [self.TWELVE, self.TWENTY_FOUR]
 
         selected_menu_num = self.run_screen(
@@ -481,6 +488,7 @@ class ToolsAddressExplorerSelectSourceView(View):
 
     def run(self):
         from seedsigner.controller import Controller
+        from seedsigner.gui.screens.screen import ButtonListScreen
 
         seeds = self.controller.storage.seeds
         button_data = []

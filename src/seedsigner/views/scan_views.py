@@ -4,8 +4,7 @@ import re
 from seedsigner.compat.l10n import gettext as _
 from seedsigner.helpers.l10n import mark_for_translation as _mft
 from seedsigner.models.settings import SettingsConstants
-from seedsigner.views.view import BackStackView, ErrorView, MainMenuView, NotYetImplementedView, View, Destination
-from seedsigner.gui.screens.screen import ButtonOption
+from seedsigner.views.view import BackStackView, ButtonOption, ErrorView, MainMenuView, NotYetImplementedView, View, Destination
 
 logger = logging.getLogger(__name__)
 

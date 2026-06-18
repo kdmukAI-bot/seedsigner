@@ -121,6 +121,7 @@ DETECT_CASES = [
     ("str_zfill",              21, "s = n.zfill(8)\n"),
     ("unicode_decode_error",   21, "try:\n    pass\nexcept UnicodeDecodeError:\n    pass\n"),
     ("multiple_inheritance",   22, "class C(A, B):\n    pass\n"),
+    ("gui_module_import",      23, "from seedsigner.gui.screens.screen import ButtonListScreen\n"),
 ]
 
 
@@ -319,6 +320,38 @@ def test_mpy02b_re_and_slice_category_enforced(tmp_path, cat, violation):
     _, result = _result(tmp_path, violation)
     exit_code, _ = mpy.evaluate_severity(result, mpy.load_baseline(str(REAL_BASELINE)))
     assert exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Per-stage enforcement proof — render-dispatch: GUI import boundary (category 23)
+#
+# Same shape as the mpy/0N proofs. The view + controller layer was decoupled from
+# the PIL-bound `seedsigner.gui` package so the shared business logic imports clean
+# on MicroPython; only `seedsigner.gui.constants` may be imported at module level,
+# everything else gui must be lazy (in-method). This asserts the baseline enforces
+# the rule, the tree is clean of it, and a fresh module-level gui import blocks CI.
+# ---------------------------------------------------------------------------
+
+def test_cat23_gui_import_boundary_enforced(tmp_path):
+    assert _real_severities()["23"]["severity"] == "fail"
+    # the business-logic tree imports gui only via gui.constants (or lazily)
+    assert [i for i in _real_tree_issues() if i.category_id == 23] == []
+    # a fresh module-level gui import would block CI under the shipped baseline
+    _, result = _result(tmp_path, "from seedsigner.gui.screens.screen import ButtonListScreen\n")
+    exit_code, _ = mpy.evaluate_severity(result, mpy.load_baseline(str(REAL_BASELINE)))
+    assert exit_code == 1
+
+
+def test_cat23_allows_gui_constants_and_lazy_imports(tmp_path):
+    """gui.constants at module level and any gui.* imported lazily are NOT flagged."""
+    code = (
+        "from seedsigner.gui.constants import GUIConstants\n"
+        "class V:\n"
+        "    def run(self):\n"
+        "        from seedsigner.gui.screens.screen import WarningScreen\n"
+        "        return WarningScreen\n"
+    )
+    assert 23 not in _categories(_scan(tmp_path, code))
 
 
 # ---------------------------------------------------------------------------
