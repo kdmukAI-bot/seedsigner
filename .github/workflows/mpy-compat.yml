@@ -1,0 +1,41 @@
+name: MicroPython compatibility
+
+# Static MicroPython 1.27 compatibility ratchet for the dual-platform refactor.
+# Runs the pattern/AST scan (Pass 2) of tools/mpy_compat_check.py over
+# src/seedsigner/ and gates the build on per-category severity in
+# tools/mpy_compat_baseline.json: `warn` categories are reported but stay green,
+# `fail` categories block on any occurrence outside their allowed_files. Each
+# migration PR flips its own category warn->fail in the same diff that drives its
+# count to zero, so the gate only ever tightens.
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  # Mirror tests.yml: dedupe by PR number, else commit SHA. A newer run in the
+  # same group cancels the one in flight.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  compat:
+    name: compatibility ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        # No submodules and no dependency install: the checker is stdlib-only and
+        # scans the source tree as text + AST. The seedsigner-translations
+        # submodule is excluded by the checker itself.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # Match SeedSigner's runtime floor (Pi Zero runs 3.10).
+          python-version: "3.10"
+      - name: Compatibility ratchet
+        # --ci emits ::warning::/::error:: annotations and sets the exit code from
+        # `fail`-severity categories in the baseline.
+        # --no-mpy-cross skips Pass 1 (compile-level syntax): a stock mpy-cross +
+        # Unix-port import smoke is a separate, later CI addition, not part of this
+        # static gate.
+        run: python tools/mpy_compat_check.py --ci --no-mpy-cross
