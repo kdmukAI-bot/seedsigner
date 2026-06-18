@@ -20,7 +20,6 @@ from seedsigner.helpers.version import Version, VersionUtils
 # These must precede any SeedSigner imports.
 sys.modules['seedsigner.hardware.displays.st7789_mpy'] = MagicMock()
 sys.modules['seedsigner.hardware.displays.ili9341'] = MagicMock()
-sys.modules['seedsigner.views.screensaver.ScreensaverScreen'] = MagicMock()
 sys.modules['RPi'] = MagicMock()
 sys.modules['RPi.GPIO'] = MagicMock()
 sys.modules['seedsigner.hardware.camera.Camera'] = MagicMock()
@@ -41,10 +40,9 @@ from seedsigner.models.qr_type import QRType
 from seedsigner.models.seed import Seed
 from seedsigner.models.settings import Settings
 from seedsigner.models.settings_definition import SettingsConstants, SettingsDefinition
-from seedsigner.views import (MainMenuView, PowerOptionsView, RestartView, RemoveMicroSDWarningView, NotYetImplementedView, UnhandledExceptionView, 
+from seedsigner.views import (MainMenuView, PowerOptionsView, RestartView, RemoveMicroSDWarningView, NotYetImplementedView, UnhandledExceptionView,
     psbt_views, seed_views, settings_views, tools_views, scan_views)
-from seedsigner.views.screensaver import OpeningSplashView
-from seedsigner.views.view import CameraConnectionErrorView, NetworkMismatchErrorView, OptionDisabledView, PowerOffView
+from seedsigner.views.view import CameraConnectionErrorView, NetworkMismatchErrorView, OpeningSplashView, OptionDisabledView, PowerOffView
 
 from .utils import ScreenshotComplete, ScreenshotConfig, ScreenshotRenderer
 

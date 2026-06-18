@@ -7,9 +7,7 @@ from typing import Callable
 # These must precede any SeedSigner imports.
 sys.modules['numpy'] = MagicMock()  # numpy is only in the Raspi requirements; not needed for tests. But is imported in BackgroundImportThread.
 sys.modules['seedsigner.gui.renderer'] = MagicMock()
-sys.modules['seedsigner.gui.screens.screensaver'] = MagicMock()
 sys.modules['seedsigner.gui.toast'] = MagicMock()
-sys.modules['seedsigner.views.screensaver'] = MagicMock()
 sys.modules['seedsigner.hardware.buttons'] = MagicMock()
 sys.modules['seedsigner.hardware.camera.Camera'] = MagicMock()
 sys.modules['seedsigner.hardware.pivideostream'] = MagicMock()
@@ -46,6 +44,12 @@ class BaseTest:
 
         # Mock out the loading screen so it can't spawn. View classes must import locally!
         patch('seedsigner.gui.screens.screen.LoadingScreenThread').start()
+
+        # Controller.start() renders OpeningSplashView before the main loop. The flow
+        # harness globally patches View.run_screen, so a real OpeningSplashView would
+        # mis-route into it; stub the View out (it now lives in views.view; the
+        # controller imports it lazily and picks up this patched symbol).
+        patch('seedsigner.views.view.OpeningSplashView').start()
 
         # Instantiate the mocked MicroSD; hold on to the instance so tests can manipulate
         # it later.

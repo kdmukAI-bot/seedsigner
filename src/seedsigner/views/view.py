@@ -484,10 +484,54 @@ class RemoveMicroSDWarningView(View):
         elif button_data[selected_menu_num] == self.SETTINGS:
             from seedsigner.views.settings_views import SettingsEntryUpdateSelectionView
             return Destination(
-                SettingsEntryUpdateSelectionView, 
+                SettingsEntryUpdateSelectionView,
                 view_args=dict(
                     attr_name=SettingsConstants.SETTING__MICROSD_TOAST_TIMER,
                     blocking_view=RemoveMicroSDWarningView,
                     unblocking_view=MainMenuView
                 )
             )
+
+
+
+class OpeningSplashView(View):
+    def __init__(self, force_partner_logos: bool | None = None):
+        self.force_partner_logos = force_partner_logos
+        self.__post_init__()
+
+    def run(self):
+        from seedsigner.gui.screens.screen import OpeningSplashScreen
+        self.run_screen(
+            OpeningSplashScreen,
+            force_partner_logos=self.force_partner_logos
+        )
+
+
+
+class Screensaver:
+    """
+    Lightweight, controller-driven manager for the screensaver. Not a View: it never goes
+    on the back stack and is driven directly via start()/stop()/is_running.
+
+    Holds a single persistent ScreensaverScreen instance so that a cross-thread stop()
+    (e.g. an SD-card toast interrupt) reaches the same instance the main thread is running.
+    """
+    def __init__(self):
+        self.screen = None
+
+    @property
+    def is_running(self) -> bool:
+        return self.screen is not None and self.screen.is_running
+
+    def start(self):
+        if self.screen is None:
+            # Lazy/late import + instantiation to reduce Controller initial startup time
+            # (and to keep this module PIL-free at import).
+            from seedsigner.gui.screens.screen import ScreensaverScreen
+            from seedsigner.hardware.buttons import HardwareButtons
+            self.screen = ScreensaverScreen(HardwareButtons.get_instance())
+        self.screen.start()
+
+    def stop(self):
+        if self.screen is not None:
+            self.screen.stop()
