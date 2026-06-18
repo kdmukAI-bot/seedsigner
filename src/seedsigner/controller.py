@@ -13,8 +13,7 @@ from seedsigner.models.settings import Settings
 from seedsigner.models.settings import SettingsConstants
 from seedsigner.models.singleton import Singleton
 from seedsigner.models.threads import BaseThread
-from seedsigner.views.screensaver import ScreensaverScreen
-from seedsigner.views.view import Destination, View
+from seedsigner.views.view import Destination, Screensaver, View
 
 
 logger = logging.getLogger(__name__)
@@ -142,7 +141,7 @@ class Controller(Singleton):
     resume_main_flow: str = None
 
     back_stack: BackStack = None
-    screensaver: ScreensaverScreen = None
+    screensaver: Screensaver = None
     toast_notification_thread: BaseToastOverlayManagerThread = None
 
 
@@ -260,7 +259,7 @@ class Controller(Singleton):
             used. Only used by the test suite.
         """
         from seedsigner.views import MainMenuView, BackStackView, RemoveMicroSDWarningView
-        from seedsigner.views.screensaver import OpeningSplashView
+        from seedsigner.views.view import OpeningSplashView
         from seedsigner.gui.toast import RemoveSDCardToastManagerThread
 
         OpeningSplashView().run()
@@ -403,11 +402,8 @@ class Controller(Singleton):
 
         logger.info("Controller: Starting screensaver")
         if not self.screensaver:
-            # Do a lazy/late import and instantiation to reduce Controller initial startup time
-            from seedsigner.views.screensaver import ScreensaverScreen
-            from seedsigner.hardware.buttons import HardwareButtons
-            self.screensaver = ScreensaverScreen(HardwareButtons.get_instance())
-        
+            self.screensaver = Screensaver()
+
         # Start the screensaver, but it will block until it can acquire the Renderer.lock.
         self.screensaver.start()
         logger.info("Controller: Screensaver started")
