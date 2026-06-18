@@ -55,6 +55,12 @@ EXCLUDED_FILES = [
     "src/seedsigner/helpers/version.py",
 ]
 
+# PIL-free islands inside otherwise-excluded gui/ that we DO want scanned, so their
+# import-time PIL-freeness is verified (category 23) rather than silently assumed.
+FORCE_INCLUDED_FILES = [
+    "src/seedsigner/gui/constants.py",
+]
+
 # Third-party dependency classification
 KNOWN_COMPATIBLE = {"embit"}
 BEING_REPLACED = {"PIL", "pyzbar", "qrcode", "Pillow"}
@@ -301,6 +307,21 @@ CATEGORIES = {
             "misbehaves, linearize init manually instead of relying on cooperative super()."
         ),
     },
+    23: {
+        "name": "GUI import boundary (PIL coupling)",
+        "description": (
+            "The `seedsigner.gui` package is PIL-bound: importing any submodule runs "
+            "gui/__init__ and pulls in the Pillow-backed renderer, which is absent on "
+            "MicroPython. The shared business logic (views/, models/, controller) must "
+            "not import `seedsigner.gui.*` at MODULE level; the sole exception is "
+            "`seedsigner.gui.constants`, which is PIL-free by construction. In-method "
+            "(lazy) gui imports are fine and are intentionally NOT flagged."
+        ),
+        "fix": (
+            "Move the `seedsigner.gui.*` import inside the method that uses it (lazy "
+            "import), or, for shared constants, import from `seedsigner.gui.constants`."
+        ),
+    },
 }
 
 
@@ -338,6 +359,7 @@ _CITATIONS = {
     20: ("library/index.html", "Module is absent from the MicroPython library index; collections.html documents only deque/namedtuple/OrderedDict.", True),
     21: ("genrst/builtin_types.html", "bit_length method is not implemented; to_bytes does not implement the signed parameter; hash.hexdigest is NOT implemented (use binascii.hexlify); str.ljust()/rjust() not implemented.", True),
     22: ("genrst/core_language.html", "Method Resolution Order (MRO) is not compliant with CPython. When inheriting from multiple classes super() only calls one class.", False),
+    23: ("library/index.html", "Pillow (PIL) — the gui rendering backend — is a third-party package absent from the MicroPython library index, so modules that must import under MicroPython cannot pull seedsigner.gui in at module load.", True),
 }
 for _cid, (_path, _quote, _static) in _CITATIONS.items():
     CATEGORIES[_cid]["doc_url"] = DOC_BASE + _path
@@ -393,7 +415,13 @@ def discover_files(scan_root, extra_excludes=None, explicit_files=None):
                 files.extend(_walk_dir(f, extra_excludes or []))
         return sorted(files)
 
-    return sorted(_walk_dir(scan_root, extra_excludes or []))
+    found = _walk_dir(scan_root, extra_excludes or [])
+    # Carve specific PIL-free gui/ modules back in (gui/ is excluded wholesale) so
+    # category 23 verifies they stay import-time PIL-free.
+    for f in FORCE_INCLUDED_FILES:
+        if os.path.isfile(f) and f not in found:
+            found.append(f)
+    return sorted(found)
 
 
 def _walk_dir(root, extra_excludes):
@@ -741,6 +769,75 @@ def scan_ast_annotations(file_path, content, lines):
 
 
 # ---------------------------------------------------------------------------
+# Pass 2: Category 23 — GUI import boundary (PIL coupling)
+# The seedsigner.gui package is PIL-bound (gui/__init__ pulls the Pillow renderer),
+# so the MicroPython-targeted business logic must not import seedsigner.gui.* at
+# MODULE level, except the PIL-free seedsigner.gui.constants. Lazy (in-method) gui
+# imports are fine and are intentionally NOT flagged.
+# ---------------------------------------------------------------------------
+
+class GuiImportBoundaryVisitor(ast.NodeVisitor):
+    """Flag absolute seedsigner.gui.* imports that execute at module load."""
+
+    def __init__(self, file_path, lines):
+        self.file_path = file_path
+        self.lines = lines
+        self.issues = []
+        self._func_depth = 0
+
+    def visit_FunctionDef(self, node):
+        # Imports nested in a function are lazy (run on call, not import) — allowed.
+        self._func_depth += 1
+        self.generic_visit(node)
+        self._func_depth -= 1
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def _flag(self, modname, lineno):
+        if not modname or self._func_depth:
+            return
+        if modname == "seedsigner.gui.constants" \
+                or modname.startswith("seedsigner.gui.constants."):
+            return
+        if modname == "seedsigner.gui" or modname.startswith("seedsigner.gui."):
+            src = self.lines[lineno - 1] if lineno <= len(self.lines) else ""
+            self.issues.append(Issue(
+                file_path=self.file_path,
+                line_number=lineno,
+                category_id=23,
+                message=(
+                    f"module-level import of `{modname}` (gui is PIL-bound); import "
+                    f"it lazily inside the method that needs it, or use "
+                    f"`seedsigner.gui.constants`"
+                ),
+                source_line=src,
+            ))
+
+    def visit_ImportFrom(self, node):
+        # node.level > 0 is package-relative (e.g. `from .view import X`); never an
+        # absolute seedsigner.gui.* import.
+        if node.level == 0:
+            self._flag(node.module, node.lineno)
+        self.generic_visit(node)
+
+    def visit_Import(self, node):
+        for alias in node.names:
+            self._flag(alias.name, node.lineno)
+        self.generic_visit(node)
+
+
+def scan_gui_import_boundary(file_path, content, lines):
+    """Flag module-level seedsigner.gui.* imports (except gui.constants)."""
+    try:
+        tree = ast.parse(content, filename=file_path)
+    except SyntaxError:
+        return []  # mpy-cross will catch syntax errors
+    visitor = GuiImportBoundaryVisitor(file_path, lines)
+    visitor.visit(tree)
+    return visitor.issues
+
+
+# ---------------------------------------------------------------------------
 # Pass 2: Category 9 (extended) — re flags / functions / pattern features
 # https://docs.micropython.org/en/v1.27.0/library/re.html
 # ---------------------------------------------------------------------------
@@ -1015,6 +1112,7 @@ def scan_file(file_path, use_mpy_cross=True, mpy_cross_path="mpy-cross"):
     issues.extend(scan_re_counted_repetitions(file_path, content, lines))
     issues.extend(scan_re_features(file_path, content, lines))
     issues.extend(scan_ast_annotations(file_path, content, lines))
+    issues.extend(scan_gui_import_boundary(file_path, content, lines))
     issues.extend(scan_extended_slices(file_path, content, lines))
     issues.extend(scan_absent_stdlib(file_path, lines))
     issues.extend(scan_mro_review(file_path, content, lines))

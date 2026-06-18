@@ -2,9 +2,9 @@ from seedsigner.compat.l10n import gettext as _
 
 from seedsigner.models.psbt_parser import PSBTParser
 from seedsigner.models.settings import SettingsConstants
-from seedsigner.gui.components import FontAwesomeIconConstants, SeedSignerIconConstants
-from seedsigner.gui.screens.screen import (RET_CODE__BACK_BUTTON, ButtonListScreen, ButtonOption, WarningScreen, DireWarningScreen, QRDisplayScreen)
-from seedsigner.views.view import BackStackView, MainMenuView, NotYetImplementedView, View, Destination
+from seedsigner.gui.constants import FontAwesomeIconConstants, SeedSignerIconConstants
+from seedsigner.views.view import (BackStackView, ButtonOption, Destination, MainMenuView,
+    NotYetImplementedView, RET_CODE__BACK_BUTTON, View)
 
 
 
@@ -17,6 +17,7 @@ class PSBTSelectSeedView(View):
 
     def run(self):
         from seedsigner.controller import Controller
+        from seedsigner.gui.screens.screen import ButtonListScreen
 
         # Note: we can't just autoroute to the PSBT Overview because we might have a
         # multisig where we want to sign with more than one key on this device.
@@ -166,6 +167,8 @@ class PSBTOverviewView(View):
 
 class PSBTUnsupportedScriptTypeWarningView(View):
     def run(self):
+        from seedsigner.gui.screens.screen import WarningScreen
+
         selected_menu_num = self.run_screen(
             WarningScreen,
             status_headline=_("Unsupported Script Type!"),
@@ -187,6 +190,8 @@ class PSBTUnsupportedScriptTypeWarningView(View):
 
 class PSBTNoChangeWarningView(View):
     def run(self):
+        from seedsigner.gui.screens.screen import WarningScreen
+
         selected_menu_num = self.run_screen(
             WarningScreen,
             # TRANSLATOR_NOTE: User will receive no change back; the inputs to this transaction are fully spent
@@ -461,6 +466,8 @@ class PSBTAddressVerificationFailedView(View):
 
 
     def run(self):
+        from seedsigner.gui.screens.screen import DireWarningScreen
+
         if self.is_multisig:
             # TRANSLATOR_NOTE: Variable is either "change" or "self-transfer".
             text = _("Transaction's {} address could not be verified from wallet descriptor.").format(_("change") if self.is_change else _("self-transfer"))
@@ -557,6 +564,7 @@ class PSBTFinalizeView(View):
 
 class PSBTSignedQRDisplayView(View):
     def run(self):
+        from seedsigner.gui.screens.screen import QRDisplayScreen
         from seedsigner.models.encode_qr import UrPsbtQrEncoder
 
         qr_encoder = UrPsbtQrEncoder(
@@ -575,6 +583,8 @@ class PSBTSigningErrorView(View):
     SELECT_DIFF_SEED = ButtonOption("Select different seed")
     
     def run(self):
+        from seedsigner.gui.screens.screen import WarningScreen
+
         psbt_parser: PSBTParser = self.controller.psbt_parser
         if not psbt_parser:
             # Should not be able to get here
