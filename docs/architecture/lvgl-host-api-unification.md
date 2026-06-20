@@ -11,15 +11,15 @@ platform-branching boilerplate**. One import, one set of calls, identical source
 Pi Zero (CPython `.so`) and ESP32-S3/P4 (MicroPython C module):
 
 ```python
-import seedsigner_lvgl
+import seedsigner_lvgl_screens
 
-seedsigner_lvgl.init()                  # full board-default bring-up
-seedsigner_lvgl.load_locale("th")       # i18n font packs (None/omit base dir)
-seedsigner_lvgl.unload_locale()
-seedsigner_lvgl.button_list_screen(cfg) # + main_menu_screen / screensaver_screen /
+seedsigner_lvgl_screens.init()                  # full board-default bring-up
+seedsigner_lvgl_screens.load_locale("th")       # i18n font packs (None/omit base dir)
+seedsigner_lvgl_screens.unload_locale()
+seedsigner_lvgl_screens.button_list_screen(cfg) # + main_menu_screen / screensaver_screen /
                                         #   seed_add_passphrase_screen / demo_screen
-seedsigner_lvgl.poll_for_result()       # → (kind, index, label) | None
-seedsigner_lvgl.clear_result_queue()
+seedsigner_lvgl_screens.poll_for_result()       # → (kind, index, label) | None
+seedsigner_lvgl_screens.clear_result_queue()
 ```
 
 All hardware-specific knobs (resolution, panel pins, color order, SD path) are
@@ -40,10 +40,11 @@ hardware. The app passes none of them.
 
 - **`load_locale` / `unload_locale`** (not `set_locale`): a matched load/unload verb
   pair. Supersedes the Pi side's shipped `set_locale`.
-- **`seedsigner_lvgl`** is the single public module name on both platforms. On Pi it
-  is a Python package wrapping the `seedsigner_lvgl_native` C extension; on ESP32 it
-  is the MicroPython C module directly. The underlying C name differing is an
-  implementation detail the business logic never sees.
+- **`seedsigner_lvgl_screens`** is the single public module name on both platforms. On Pi it
+  is a Python package wrapping the underlying C extension (currently
+  `seedsigner_lvgl_native`); on ESP32 it is the MicroPython C module directly. The
+  underlying C / `.so` name differing is an implementation detail the business logic
+  never sees — only the public import name is fixed.
 
 ## Why a single `init()` — and why no hardware/LVGL split on the MCU
 
@@ -84,7 +85,7 @@ single board-owned mode. Then:
 
 ### ESP32-S3 / P4 — implemented (seedsigner-micropython-builder)
 
-- Single MicroPython module **`seedsigner_lvgl`** (`bindings/modseedsigner_bindings.c`)
+- Single MicroPython module **`seedsigner_lvgl_screens`** (`bindings/modseedsigner_bindings.c`)
   exposes `init` + `load_locale` + `unload_locale` + the screens. The separate
   `display_manager` MicroPython module was **retired** — its C impl
   (`ports/esp32/display_manager/display_manager.cpp`) remains as the internal
@@ -99,14 +100,14 @@ single board-owned mode. Then:
   `seedsigner-micropython-builder/docs/knowledge/micropython-fatfs-vs-esp-idf-fatfs-collision.md`.
   So the card is mounted + read on the **MicroPython side** (`machine.SDCard` + FAT
   VFS), and the pack *bytes* are handed to the C loader:
-  - `seedsigner_lvgl.locale_pack_files(locale)` → the files this locale needs.
+  - `seedsigner_lvgl_screens.locale_pack_files(locale)` → the files this locale needs.
   - Python reads each off the SD card, stages them in a `{filename: bytes}` dict.
-  - `seedsigner_lvgl.load_locale(locale, packs)` drives `ss_load_locale` (wrapped in
+  - `seedsigner_lvgl_screens.load_locale(locale, packs)` drives `ss_load_locale` (wrapped in
     the `esp_lvgl_port` lock, since tiny_ttf rasterization mutates LVGL state on the
     LVGL task) through a provider that serves bytes from the dict.
 
   This is the `locale_loader` "pre-fetch / staging" pattern (the same one the WASM
-  playground uses). A thin frozen Python `seedsigner_lvgl` wrapper will later hide
+  playground uses). A thin frozen Python `seedsigner_lvgl_screens` wrapper will later hide
   the SD read so the shared app calls a bare `load_locale(locale)` — matching Pi.
 
 ### Pi Zero — deferred changes (seedsigner-raspi-lvgl)
