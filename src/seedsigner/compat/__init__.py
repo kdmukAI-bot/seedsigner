@@ -32,3 +32,12 @@ the app imports directly — see ``docs/micropython_compatibility.md`` §3.)
 See ``docs/micropython_compatibility.md`` (the self-documenting checker is its
 companion: ``tools/mpy_compat_check.py``).
 """
+
+import sys
+
+# The single runtime discriminator for the two target interpreters. CPython
+# (Pi Zero) reports ``"cpython"``; stock MicroPython 1.27 (ESP32) reports
+# ``"micropython"``. Prefer this over scattered ``hasattr``/version probes so the
+# platform branch is named and greppable. ``sys.implementation.name`` exists on
+# both interpreters.
+IS_MICROPYTHON = sys.implementation.name == "micropython"
