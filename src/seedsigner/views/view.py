@@ -168,13 +168,31 @@ class View:
         return self._redirect
 
 
-    def run_screen(self, Screen_cls, **kwargs) -> int | str:
+    def run_screen(self, screen, *, lvgl_cfg=None, allow_screensaver=True, **kwargs) -> int | str:
         """
-            Instantiates the provided Screen_cls and runs its interactive display.
-            Returns the user's input upon completion.
+            Dispatch to a Screen implementation, run its interactive display, and
+            return the user's input.
+
+            * A PIL Screen *class* (a ``type``) is instantiated with ``**kwargs``
+              and displayed — the long-standing CPython path, unchanged for every
+              existing call site.
+            * An LVGL screen, identified by its native screen-function *name* (a
+              ``str``), is run through the LVGL screen runner. ``lvgl_cfg`` is the
+              JSON-style config dict handed to the native screen; ``allow_screensaver``
+              lets a screen opt out of the idle screensaver (e.g. camera scanning).
+
+            ``isinstance(screen, type)`` is the discriminator (MicroPython-safe):
+            classes take the PIL branch, strings the LVGL branch.
         """
-        self.screen = Screen_cls(**kwargs)
-        return self.screen.display()
+        if isinstance(screen, type):
+            self.screen = screen(**kwargs)
+            return self.screen.display()
+
+        # LVGL screen (by name). Imported lazily so Views never pull the native
+        # module in, and so this stays out of the module-level import graph that
+        # must load on MicroPython.
+        from seedsigner.gui.lvgl_screen_runner import run_lvgl_screen
+        return run_lvgl_screen(self.renderer, screen, cfg=lvgl_cfg, allow_screensaver=allow_screensaver)
 
 
     def run(self, **kwargs) -> 'Destination':
