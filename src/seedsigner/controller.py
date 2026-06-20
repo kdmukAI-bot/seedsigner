@@ -82,6 +82,18 @@ class BackgroundImportThread(BaseThread):
         time_import('seedsigner.views.tools_views')
         time_import('seedsigner.views.settings_views')
 
+        # Warm up the LVGL runtime so the first LVGL screen renders without the
+        # init cost (a successful init logs from ensure_lvgl_runtime). The native
+        # seedsigner_lvgl_screens module is simply absent on CPython dev/CI
+        # machines and non-LVGL builds — an expected, unremarkable condition here,
+        # so the warm-up just no-ops. If LVGL really is expected, the absence
+        # surfaces loudly at the first run_lvgl_screen() call (not swallowed).
+        try:
+            from seedsigner.gui.lvgl_screen_runner import ensure_lvgl_runtime
+            ensure_lvgl_runtime()
+        except ImportError:
+            pass
+
 
 
 class Controller(Singleton):
