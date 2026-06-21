@@ -115,6 +115,27 @@ def _translate_event(event):
     return index
 
 
+def _pump_until_result(timeout_ms):
+    """Drive the LVGL cycle on the *current* (already-built) screen until a result
+    is queued or ``timeout_ms`` ms elapse (0 = run until a result).
+
+    Built on the public ``lvgl_pump`` (which runs ``lv_timer_handler`` for a short
+    slice) so that a screen restored after the screensaver resumes *in place* — its
+    focus/scroll intact — instead of being rebuilt from config, which would reset
+    focus to the default button. Mirrors the native run-until-result loop that the
+    one-shot screen functions use internally. CPython/blended path only.
+    """
+    import time
+    deadline = None if timeout_ms == 0 else time.time() + timeout_ms / 1000.0
+    while True:
+        _lv.lvgl_pump(5, 1)
+        event = _lv.poll_for_result()
+        if event is not None:
+            return event
+        if deadline is not None and time.time() >= deadline:
+            return None
+
+
 def run_lvgl_screen(renderer, screen, *, cfg=None, allow_screensaver=True):
     """Run an LVGL screen while holding the renderer lock; return its result.
 
@@ -140,6 +161,12 @@ def run_lvgl_screen(renderer, screen, *, cfg=None, allow_screensaver=True):
     args = (cfg,) if cfg is not None else ()
     timeout_ms = _screensaver_timeout_ms if allow_screensaver else 0
 
+    # The screen is BUILT once (the native screen fn builds the widget tree and runs
+    # its event loop). After an idle-timeout screensaver we RESUME the same screen by
+    # pumping its event loop in place — rebuilding would reset focus to the default
+    # button. save_screen/restore_screen keep that screen object alive across the
+    # screensaver so the pump has a live screen to resume.
+    build = True
     try:
         while True:
             with renderer.lock:
@@ -148,12 +175,19 @@ def run_lvgl_screen(renderer, screen, *, cfg=None, allow_screensaver=True):
                     _lv.set_flush_mode("python")
                     _lv.set_flush_callback(_make_flush_callback(renderer.disp))
                 _lv.clear_result_queue()
-                if timeout_ms > 0:
-                    screen_fn(*args, wait_timeout_ms=timeout_ms)
+                if build or IS_MICROPYTHON:
+                    # First render (or MicroPython, whose native screen fn owns its
+                    # own loop): build the screen and run until a result/timeout.
+                    if timeout_ms > 0:
+                        screen_fn(*args, wait_timeout_ms=timeout_ms)
+                    else:
+                        screen_fn(*args)
+                    event = _lv.poll_for_result()
                 else:
-                    screen_fn(*args)
+                    # Resume the screen restored after the screensaver (focus/scroll
+                    # intact) by pumping its event loop — no rebuild.
+                    event = _pump_until_result(timeout_ms)
 
-            event = _lv.poll_for_result()
             if event is not None:
                 # Reset the PIL-side input timer so returning to a PIL screen
                 # doesn't immediately re-trigger the screensaver.
@@ -161,21 +195,22 @@ def run_lvgl_screen(renderer, screen, *, cfg=None, allow_screensaver=True):
                 HardwareButtons.get_instance().update_last_input_time()
                 return _translate_event(event)
 
-            # No result means the idle timeout fired — run the screensaver and
-            # loop back, preserving the LVGL screen's focus/scroll state.
-            if timeout_ms > 0:
-                _lv.save_screen()
-                try:
-                    lvgl_screensaver_screen(renderer)
-                finally:
-                    _lv.restore_screen()
-                # Debounce: let the wakeup press release so it doesn't register
-                # as input on the re-entered screen.
-                import time
-                time.sleep(0.25)
-                continue
+            if timeout_ms == 0:
+                # No screensaver requested and no result: nothing left to wait on.
+                return None
 
-            return None
+            # Idle timeout fired: run the screensaver over the saved screen, then
+            # loop back to resume that same screen via the pump branch above.
+            _lv.save_screen()
+            try:
+                lvgl_screensaver_screen(renderer)
+            finally:
+                _lv.restore_screen()
+            # Debounce: let the wakeup press release so it doesn't register as
+            # input on the resumed screen.
+            import time
+            time.sleep(0.25)
+            build = False
     finally:
         if not IS_MICROPYTHON:
             _lv.set_flush_callback(None)
@@ -184,18 +219,13 @@ def run_lvgl_screen(renderer, screen, *, cfg=None, allow_screensaver=True):
 def lvgl_screensaver_screen(renderer):
     """Run the LVGL screensaver (bouncing logo); blocks until any input.
 
-    Invoked both from an LVGL screen's idle timeout (above, wrapped in
-    save_screen/restore_screen) and from a PIL context
-    (Controller.start_screensaver). On CPython the PIL canvas is saved and
-    restored so the underlying screen repaints; on MicroPython LVGL owns the
-    panel, so there is no canvas to preserve.
+    Invoked only from an LVGL screen's idle timeout in ``run_lvgl_screen`` above,
+    wrapped in ``save_screen``/``restore_screen``. Repainting the screen the
+    screensaver covered is that caller's job: it restores its saved LVGL screen
+    and re-renders on the next loop iteration. This function deliberately does not
+    touch the PIL canvas — on the blended display the canvas holds the last *PIL*
+    screen drawn (e.g. a menu visited before the LVGL screen took over via
+    ``blit_rgb565``), so re-showing it here would flash that stale frame for a
+    moment on wake before the LVGL screen repaints.
     """
-    if IS_MICROPYTHON:
-        run_lvgl_screen(renderer, "screensaver_screen", allow_screensaver=False)
-        return
-
-    last_screen = renderer.canvas.copy()
-    try:
-        run_lvgl_screen(renderer, "screensaver_screen", allow_screensaver=False)
-    finally:
-        renderer.show_image(last_screen)
+    run_lvgl_screen(renderer, "screensaver_screen", allow_screensaver=False)
