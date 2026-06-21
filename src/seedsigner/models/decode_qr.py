@@ -1,7 +1,6 @@
 import json
 import logging
 import re
-import zlib
 
 from binascii import a2b_base64, b2a_base64
 from embit import psbt, bip39
@@ -12,6 +11,7 @@ from urtypes.crypto import Account, Output
 from urtypes.bytes import Bytes
 
 from seedsigner.compat.base64 import b32decode, b64decode, b64encode
+from seedsigner.compat.zlib import decompress_raw
 from seedsigner.helpers.ur2.ur_decoder import URDecoder
 from seedsigner.models.qr_type import QRType
 from seedsigner.models.seed import Seed
@@ -775,10 +775,9 @@ class BBQRPsbtQrDecoder(BaseAnimatedQrDecoder):
                 rv += b32decode(p + (padding*'='))
 
             if self.encoding == 'Z':
-                # decompress
-                z = zlib.decompressobj(wbits=-10)
-                rv = z.decompress(rv)
-                rv += z.flush()
+                # decompress (raw DEFLATE, 2**10 window); zlib on CPython,
+                # deflate on MicroPython (see compat.zlib).
+                rv = decompress_raw(rv, wbits=-10)
 
             return rv
 
