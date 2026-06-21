@@ -177,7 +177,7 @@ class Controller(Singleton):
             raise Exception("Instance already configured")
 
         # Instantiate the one and only Controller instance
-        controller = cls.__new__(cls)
+        controller = object.__new__(cls)
         cls._instance = controller
 
         # Check for libraqm support and log the status if not supported

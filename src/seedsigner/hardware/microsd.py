@@ -21,7 +21,7 @@ class MicroSD(Singleton, BaseThread):
         # This is the only way to access the one and only instance
         if cls._instance is None:
             # Instantiate the one and only instance
-            microsd = cls.__new__(cls)
+            microsd = object.__new__(cls)
             cls._instance = microsd
 
             # explicitly call BaseThread __init__ since multiple class inheritance

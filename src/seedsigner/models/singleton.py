@@ -9,7 +9,7 @@ class Singleton:
     def get_instance(cls):
         # This is the only way to access the one and only instance
         if cls._instance is None:
-            cls._instance = cls.__new__(cls)
+            cls._instance = object.__new__(cls)
         return cls._instance
 
 
