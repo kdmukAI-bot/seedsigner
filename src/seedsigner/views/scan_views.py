@@ -61,10 +61,14 @@ class ScanView(View):
                 # Report QR types in more human-readable text (e.g. QRType
                 # `seed__compactseedqr` as "seed: compactseedqr").
                 # TODO: cleanup l10n presentation
+                # Build the human-readable type outside the f-string: stock
+                # MicroPython's f-string parser rejects nested same-type quotes
+                # and backslash escapes inside the expression.
+                qr_type_display = self.decoder.qr_type.replace("__", ": ").replace("_", " ")
                 return Destination(ErrorView, view_args=dict(
                     title="Error",
                     status_headline=_("Wrong QR Type"),
-                    text=_(self.invalid_qr_type_message) + f""", received "{self.decoder.qr_type.replace("__", ": ").replace("_", " ")}\" format""",
+                    text=_(self.invalid_qr_type_message) + f', received "{qr_type_display}" format',
                     button_text="Back",
                     next_destination=Destination(BackStackView, skip_current_view=True),
                 ))
