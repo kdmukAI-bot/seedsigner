@@ -43,22 +43,17 @@ import sys
 EXPECTED_MISSING = ("embit", "PIL", "Pillow", "pyzbar", "qrcode", "numpy")
 
 
-# Pre-existing real incompatibilities this smoke surfaced, grandfathered so the
-# gate guards against NEW breakage immediately (mirrors `allowed_files` in the
-# static checker's baseline — the gate only ever tightens). Each entry routes to
-# the compat layer that will fix it; remove the entry in the same change that
-# lands the fix. A module here that *passes* is reported so the entry can be
-# dropped — it does not fail the build (avoids ratchet flakiness).
-#   - models.decode_qr: `import zlib` — MicroPython 1.27 ships `deflate`, not
-#     `zlib` (decode_qr.py uses zlib.decompressobj). Fix routes to a stdlib swap
-#     (mpy/02-stdlib-swaps): a compat.zlib over `deflate`, or migrate the call.
-#   - views.scan_views: a complex f-string (nested same-type quotes + a `\"`
-#     backslash escape) the MicroPython f-string parser rejects. Fix routes to
-#     the syntax layers (mpy/01/02): simplify the f-string.
-KNOWN_FAILURES = {
-    "seedsigner.models.decode_qr": "import zlib (use deflate) -> mpy/02-stdlib-swaps",
-    "seedsigner.views.scan_views": "complex f-string unsupported -> mpy/01-02 syntax",
-}
+# Real incompatibilities this smoke surfaced but cannot fix in its own layer are
+# grandfathered here, so the gate guards NEW breakage immediately (mirrors
+# `allowed_files` in the static checker's baseline — the gate only ever tightens).
+# Each entry routes to the compat layer that will fix it; the entry is removed in
+# the same change that lands the fix. A module here that *passes* is reported so
+# the entry can be dropped — it does not fail the build (avoids ratchet flakiness).
+#
+# Empty: the two findings from B1 are fixed in their layers —
+#   - models.decode_qr `import zlib` -> compat.zlib (mpy/07); now SKIP (needs embit)
+#   - views.scan_views complex f-string -> simplified (mpy/02b); now imports clean
+KNOWN_FAILURES = {}
 
 
 def _missing_module_name(exc):
