@@ -1528,7 +1528,32 @@ def parse_args(argv=None):
         help="CI mode: emit GitHub ::warning::/::error:: annotations and set "
              "exit code from `fail`-severity categories (the ratchet).",
     )
+    parser.add_argument(
+        "--list-modules", action="store_true",
+        help="Print the keep-set as dotted module names (one per line) and exit. "
+             "The single source of truth for which modules the MicroPython "
+             "import-smoke (tools/mpy_import_smoke.py) attempts to import.",
+    )
     return parser.parse_args(argv)
+
+
+def path_to_module(file_path):
+    """Convert a discovered source path to its dotted import name.
+
+    ``src/seedsigner/models/settings.py``      -> ``seedsigner.models.settings``
+    ``src/seedsigner/compat/__init__.py``      -> ``seedsigner.compat``
+    Assumes the conventional ``src/`` import root (where ``seedsigner`` is a
+    top-level package), matching how both runtimes put ``src`` on the path.
+    """
+    norm = os.path.normpath(file_path)
+    parts = norm.split(os.sep)
+    if "src" in parts:
+        parts = parts[parts.index("src") + 1:]
+    if parts and parts[-1] == "__init__.py":
+        parts = parts[:-1]
+    elif parts:
+        parts[-1] = parts[-1][:-len(".py")]
+    return ".".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -1588,6 +1613,14 @@ def main(argv=None):
     if not files:
         print("No files found to scan.", file=sys.stderr)
         sys.exit(1)
+
+    if args.list_modules:
+        # Emit the keep-set as dotted module names for the import-smoke driver.
+        for fpath in files:
+            module = path_to_module(fpath)
+            if module:
+                print(module)
+        return 0
 
     # Scan all files
     all_issues = []
