@@ -75,14 +75,18 @@ class BackgroundImportThread(BaseThread):
         from seedsigner.models.seed_storage import SeedStorage
         Controller.get_instance()._storage = SeedStorage()
 
-        time_import('numpy')  # used by PiVideoStream; by far the slowest import (2.29s)
-        time_import('seedsigner.hardware.pivideostream') 
+        if not IS_MICROPYTHON:
+            # CPython-only warm-ups: numpy + the camera stream, and the view modules
+            # whose lazy PIL/camera imports would fail on MicroPython (those screens
+            # route to the not-implemented notice on-device, so warming them is moot).
+            time_import('numpy')  # used by PiVideoStream; by far the slowest import (2.29s)
+            time_import('seedsigner.hardware.pivideostream')
 
-        # Get MainMenuView ready to respond quickly
-        time_import('seedsigner.views.scan_views')
-        time_import('seedsigner.views.seed_views')
-        time_import('seedsigner.views.tools_views')
-        time_import('seedsigner.views.settings_views')
+            # Get MainMenuView ready to respond quickly
+            time_import('seedsigner.views.scan_views')
+            time_import('seedsigner.views.seed_views')
+            time_import('seedsigner.views.tools_views')
+            time_import('seedsigner.views.settings_views')
 
         # Warm up the LVGL runtime so the first LVGL screen renders without the
         # init cost (a successful init logs from ensure_lvgl_runtime). The native
@@ -176,7 +180,13 @@ class Controller(Singleton):
 
     @classmethod
     def configure_instance(cls):
-        from seedsigner.gui.renderer import Renderer
+        if IS_MICROPYTHON:
+            # gui.renderer imports PIL at module top and owns a PIL canvas; on
+            # MicroPython the native LVGL module owns the panel, so use the
+            # PIL-free stand-in (mirrors View._initialize's renderer selection).
+            from seedsigner.gui.lvgl_renderer import LvglRenderer as Renderer
+        else:
+            from seedsigner.gui.renderer import Renderer
         from seedsigner.hardware.microsd import MicroSD
 
         # Must be called before the first get_instance() call
@@ -187,16 +197,19 @@ class Controller(Singleton):
         controller = object.__new__(cls)
         cls._instance = controller
 
-        # Check for libraqm support and log the status if not supported
-        from PIL import features
-        if not features.check('raqm'):
-            logger.warning("libraqm support: NOT AVAILABLE - Complex text rendering may be limited")
+        if not IS_MICROPYTHON:
+            # Check for libraqm support and log the status if not supported
+            from PIL import features
+            if not features.check('raqm'):
+                logger.warning("libraqm support: NOT AVAILABLE - Complex text rendering may be limited")
 
         # models
         controller.settings = Settings.get_instance()
-        
+
         controller.microsd = MicroSD.get_instance()
-        controller.microsd.start_detection()
+        if not IS_MICROPYTHON:
+            # SD hotplug detection uses Linux mdev + a FIFO; not wired on ESP32 yet.
+            controller.microsd.start_detection()
 
         # Store one working psbt in memory
         controller.psbt = None
@@ -258,7 +271,8 @@ class Controller(Singleton):
             used. Only used by the test suite.
         """
         from seedsigner.views import MainMenuView, BackStackView, RemoveMicroSDWarningView
-        from seedsigner.gui.toast import RemoveSDCardToastManagerThread
+        if not IS_MICROPYTHON:
+            from seedsigner.gui.toast import RemoveSDCardToastManagerThread
 
         # TEMPORARY (LVGL bring-up): the opening splash is still a PIL screen, so it
         # can't render on MicroPython and would crash the boot before the main menu.
@@ -299,11 +313,14 @@ class Controller(Singleton):
             else:
                 next_destination = Destination(MainMenuView)
             
-            # Set up our one-time toast notification tip to remove the SD card
-            if self.settings.get_value(SettingsConstants.SETTING__MICROSD_TOAST_TIMER) == SettingsConstants.MICROSD_TOAST_TIMER_FIVE_SECONDS:
-                self.activate_toast(RemoveSDCardToastManagerThread())
-            elif self.settings.get_value(SettingsConstants.SETTING__MICROSD_TOAST_TIMER) == SettingsConstants.MICROSD_TOAST_TIMER_FOREVER:
-                next_destination = Destination(RemoveMicroSDWarningView)
+            # Set up our one-time toast notification tip to remove the SD card.
+            # The toast overlay is a PIL component (and @dataclass) pending LVGL
+            # migration; skip its import + activation on MicroPython.
+            if not IS_MICROPYTHON:
+                if self.settings.get_value(SettingsConstants.SETTING__MICROSD_TOAST_TIMER) == SettingsConstants.MICROSD_TOAST_TIMER_FIVE_SECONDS:
+                    self.activate_toast(RemoveSDCardToastManagerThread())
+                elif self.settings.get_value(SettingsConstants.SETTING__MICROSD_TOAST_TIMER) == SettingsConstants.MICROSD_TOAST_TIMER_FOREVER:
+                    next_destination = Destination(RemoveMicroSDWarningView)
 
             while True:
                 # Destination(None) is a special case; render the Home screen
@@ -389,16 +406,19 @@ class Controller(Singleton):
                     logger.info(f"NOT appending {next_destination}")
 
         finally:
-            from seedsigner.gui.renderer import Renderer
             if self.is_screensaver_running:
                 self.screensaver.stop()
-            
+
             if self.toast_notification_thread and self.toast_notification_thread.is_alive():
                 self.toast_notification_thread.stop()
 
             # Clear the screen when exiting
             logger.info("Clearing screen, exiting")
-            Renderer.get_instance().display_blank_screen()
+            if not IS_MICROPYTHON:
+                # display_blank_screen lives on the PIL Renderer; on MicroPython the
+                # native LVGL module owns the panel (LvglRenderer holds no canvas).
+                from seedsigner.gui.renderer import Renderer
+                Renderer.get_instance().display_blank_screen()
 
 
     @property
