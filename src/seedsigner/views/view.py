@@ -192,6 +192,20 @@ class View:
             classes take the PIL branch, strings the LVGL branch.
         """
         if isinstance(screen, type):
+            if IS_MICROPYTHON:
+                # A PIL Screen *class* can't render on MicroPython (no PIL). Show
+                # the recoverable not-implemented notice instead of instantiating
+                # it, so a not-yet-migrated screen can't kill the session. This is
+                # the defensive path; the dominant one is a View whose lazy PIL
+                # import fails before run_screen is reached — caught by the
+                # Controller and routed to NotYetImplementedView.
+                from seedsigner.gui.lvgl_screen_runner import run_lvgl_screen
+                return run_lvgl_screen(
+                    self.renderer,
+                    "large_icon_status_screen",
+                    cfg=not_implemented_lvgl_cfg(_mft("This is still on our to-do list!")),
+                    allow_screensaver=False,
+                )
             self.screen = screen(**kwargs)
             return self.screen.display()
 
@@ -376,6 +390,27 @@ class PowerOffView(View):
 
 
 
+def not_implemented_lvgl_cfg(text: str) -> dict:
+    """Config for the native ``large_icon_status_screen`` rendered as the
+    recoverable not-implemented notice on MicroPython.
+
+    Shared by ``NotYetImplementedView`` and ``View.run_screen``'s MicroPython
+    guard. Mirrors the PIL ``WarningScreen`` wording so the strings come from the
+    same translation catalog entries.
+    """
+    return {
+        "top_nav": {
+            "title": _("Work In Progress"),
+            "show_back_button": False,
+            "show_power_button": False,
+        },
+        "status_type": "warning",
+        "status_headline": _("Not Yet Implemented"),
+        "text": text,
+        "button_list": [_("Back to main menu")],
+    }
+
+
 class NotYetImplementedView(View):
     """
         Temporary View to use during dev.
@@ -386,15 +421,26 @@ class NotYetImplementedView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import WarningScreen
+        if IS_MICROPYTHON:
+            # PIL screens (WarningScreen) can't render on MicroPython; show the
+            # native LVGL status screen by name instead.
+            self.run_screen(
+                "large_icon_status_screen",
+                lvgl_cfg=not_implemented_lvgl_cfg(self.text),
+                # A transient notice has no idle screensaver; it also keeps the
+                # native call to a single positional cfg arg (no wait_timeout_ms).
+                allow_screensaver=False,
+            )
+        else:
+            from seedsigner.gui.screens.screen import WarningScreen
 
-        self.run_screen(
-            WarningScreen,
-            title=_("Work In Progress"),
-            status_headline=_("Not Yet Implemented"),
-            text=self.text,
-            button_data=[ButtonOption("Back to main menu")],
-        )
+            self.run_screen(
+                WarningScreen,
+                title=_("Work In Progress"),
+                status_headline=_("Not Yet Implemented"),
+                text=self.text,
+                button_data=[ButtonOption("Back to main menu")],
+            )
 
         return Destination(MainMenuView)
 
