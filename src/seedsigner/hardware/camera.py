@@ -22,7 +22,7 @@ class Camera(Singleton):
     def get_instance(cls):
         # This is the only way to access the one and only Controller
         if cls._instance is None:
-            cls._instance = cls.__new__(cls)
+            cls._instance = object.__new__(cls)
         cls._instance._camera_rotation = int(Settings.get_instance().get_value(SettingsConstants.SETTING__CAMERA_ROTATION))
         return cls._instance
 

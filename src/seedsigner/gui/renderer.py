@@ -26,7 +26,7 @@ class Renderer(ConfigurableSingleton):
     @classmethod
     def configure_instance(cls):
         # Instantiate the one and only Renderer instance
-        renderer = cls.__new__(cls)
+        renderer = object.__new__(cls)
         cls._instance = renderer
 
         renderer.initialize_display()
