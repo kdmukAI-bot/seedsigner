@@ -46,5 +46,5 @@ class LvglRenderer(ConfigurableSingleton):
     def configure_instance(cls):
         # Instantiate the one and only LvglRenderer instance. No display setup:
         # the native seedsigner_lvgl_screens module owns the panel on-device.
-        renderer = cls.__new__(cls)
+        renderer = object.__new__(cls)
         cls._instance = renderer
