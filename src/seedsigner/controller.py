@@ -10,6 +10,7 @@ from seedsigner.models.settings import Settings
 from seedsigner.models.settings import SettingsConstants
 from seedsigner.models.singleton import Singleton
 from seedsigner.models.threads import BaseThread
+from seedsigner.compat import IS_MICROPYTHON
 from seedsigner.views.view import Destination, Screensaver, View
 
 
@@ -268,10 +269,15 @@ class Controller(Singleton):
             used. Only used by the test suite.
         """
         from seedsigner.views import MainMenuView, BackStackView, RemoveMicroSDWarningView
-        from seedsigner.views.view import OpeningSplashView
         from seedsigner.gui.toast import RemoveSDCardToastManagerThread
 
-        OpeningSplashView().run()
+        # TEMPORARY (LVGL bring-up): the opening splash is still a PIL screen, so it
+        # can't render on MicroPython and would crash the boot before the main menu.
+        # Commented out to unblock the ESP32 running-prototype while its LVGL screen
+        # is pending (a small new screen in seedsigner-lvgl-screens). RESTORE this —
+        # `OpeningSplashView().run()` — once that LVGL splash screen lands.
+        # from seedsigner.views.view import OpeningSplashView
+        # OpeningSplashView().run()
 
         """ Class references can be stored as variables in python!
 
@@ -349,7 +355,17 @@ class Controller(Singleton):
                     # Display user-friendly error screen w/debugging info
                     from seedsigner.compat.traceback import print_exception
                     print_exception(e)
-                    next_destination = self.handle_exception(e)
+                    if IS_MICROPYTHON:
+                        # handle_exception routes to the PIL UnhandledExceptionView
+                        # (ErrorScreen), which can't render on MicroPython — so the
+                        # recovery itself would crash and kill the session. During
+                        # LVGL bring-up the dominant cause is a not-yet-migrated
+                        # screen failing at its lazy PIL import; show the recoverable
+                        # LVGL notice and return home so the session survives.
+                        from seedsigner.views.view import NotYetImplementedView
+                        next_destination = Destination(NotYetImplementedView, clear_history=True)
+                    else:
+                        next_destination = self.handle_exception(e)
 
                 if not next_destination:
                     # Should only happen during dev when you hit an unimplemented option
