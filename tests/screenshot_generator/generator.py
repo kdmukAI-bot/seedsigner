@@ -40,7 +40,7 @@ from seedsigner.models.qr_type import QRType
 from seedsigner.models.seed import Seed
 from seedsigner.models.settings import Settings
 from seedsigner.models.settings_definition import SettingsConstants, SettingsDefinition
-from seedsigner.views import (MainMenuView, PowerOptionsView, RestartView, RemoveMicroSDWarningView, NotYetImplementedView, UnhandledExceptionView,
+from seedsigner.views import (PowerOptionsView, RestartView, RemoveMicroSDWarningView, NotYetImplementedView, UnhandledExceptionView,
     psbt_views, seed_views, settings_views, tools_views, scan_views)
 from seedsigner.views.view import CameraConnectionErrorView, NetworkMismatchErrorView, OpeningSplashView, OptionDisabledView, PowerOffView
 
@@ -343,17 +343,23 @@ def generate_screenshots(locale):
                 ScreenshotConfig(OpeningSplashView, dict(force_partner_logos=True), mock_context_manager=mock_version_to_most_recent_release),
                 ScreenshotConfig(OpeningSplashView, dict(force_partner_logos=False), screenshot_name="OpeningSplashView_no_partner_logos", mock_context_manager=mock_version_to_most_recent_release),
                 ScreenshotConfig(OpeningSplashView, dict(force_partner_logos=True),  screenshot_name="OpeningSplashView_current_git_state"),
-                ScreenshotConfig(MainMenuView),
-                ScreenshotConfig(MainMenuView, screenshot_name='MainMenuView_SDCardStateChangeToast_removed',  toast_thread=SDCardStateChangeToastManagerThread(action=MicroSD.ACTION__REMOVED, activation_delay=0, duration=0)),
-                ScreenshotConfig(MainMenuView, screenshot_name='MainMenuView_SDCardStateChangeToast_inserted', toast_thread=SDCardStateChangeToastManagerThread(action=MicroSD.ACTION__INSERTED, activation_delay=0, duration=0)),
-                ScreenshotConfig(MainMenuView, screenshot_name='MainMenuView_RemoveSDCardToast',               toast_thread=RemoveSDCardToastManagerThread(activation_delay=0, duration=0)),
+                # MainMenuView migrated to an LVGL screen, so it can no longer render in the
+                # PIL screenshot generator and its standalone capture drops out (its visual is
+                # covered by the seedsigner-lvgl-screens desktop generator). The toast variants
+                # below still need a full-screen PIL backdrop to render the overlay onto, so they
+                # use PowerOptionsView as a temporary stand-in while keeping their MainMenuView_*
+                # names — at cutover the generator flips to drive LVGL screens via their Views and
+                # the real main-menu backdrop returns.
+                ScreenshotConfig(PowerOptionsView, screenshot_name='MainMenuView_SDCardStateChangeToast_removed',  toast_thread=SDCardStateChangeToastManagerThread(action=MicroSD.ACTION__REMOVED, activation_delay=0, duration=0)),
+                ScreenshotConfig(PowerOptionsView, screenshot_name='MainMenuView_SDCardStateChangeToast_inserted', toast_thread=SDCardStateChangeToastManagerThread(action=MicroSD.ACTION__INSERTED, activation_delay=0, duration=0)),
+                ScreenshotConfig(PowerOptionsView, screenshot_name='MainMenuView_RemoveSDCardToast',               toast_thread=RemoveSDCardToastManagerThread(activation_delay=0, duration=0)),
                 ScreenshotConfig(RemoveMicroSDWarningView),
-                ScreenshotConfig(MainMenuView, screenshot_name='MainMenuView_DefaultToast',                    toast_thread=DefaultToast("This is a default text toast!", activation_delay=0, duration=0)),
-                ScreenshotConfig(MainMenuView, screenshot_name='MainMenuView_InfoToast',                       toast_thread=InfoToast("This is an info toast!", activation_delay=0, duration=0)),
-                ScreenshotConfig(MainMenuView, screenshot_name='MainMenuView_SuccessToast',                    toast_thread=SuccessToast("This is a success toast!", activation_delay=0, duration=0)),
-                ScreenshotConfig(MainMenuView, screenshot_name='MainMenuView_WarningToast',                    toast_thread=WarningToast("This is a warning toast!", activation_delay=0, duration=0)),
-                ScreenshotConfig(MainMenuView, screenshot_name='MainMenuView_DireWarningToast',                toast_thread=DireWarningToast("This is a dire warning toast!", activation_delay=0, duration=0)),
-                ScreenshotConfig(MainMenuView, screenshot_name='MainMenuView_ErrorToast',                      toast_thread=ErrorToast("This is an error toast!", activation_delay=0, duration=0)),
+                ScreenshotConfig(PowerOptionsView, screenshot_name='MainMenuView_DefaultToast',                    toast_thread=DefaultToast("This is a default text toast!", activation_delay=0, duration=0)),
+                ScreenshotConfig(PowerOptionsView, screenshot_name='MainMenuView_InfoToast',                       toast_thread=InfoToast("This is an info toast!", activation_delay=0, duration=0)),
+                ScreenshotConfig(PowerOptionsView, screenshot_name='MainMenuView_SuccessToast',                    toast_thread=SuccessToast("This is a success toast!", activation_delay=0, duration=0)),
+                ScreenshotConfig(PowerOptionsView, screenshot_name='MainMenuView_WarningToast',                    toast_thread=WarningToast("This is a warning toast!", activation_delay=0, duration=0)),
+                ScreenshotConfig(PowerOptionsView, screenshot_name='MainMenuView_DireWarningToast',                toast_thread=DireWarningToast("This is a dire warning toast!", activation_delay=0, duration=0)),
+                ScreenshotConfig(PowerOptionsView, screenshot_name='MainMenuView_ErrorToast',                      toast_thread=ErrorToast("This is an error toast!", activation_delay=0, duration=0)),
                 ScreenshotConfig(PowerOptionsView),
                 ScreenshotConfig(RestartView),
                 ScreenshotConfig(PowerOffView),

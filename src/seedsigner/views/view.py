@@ -283,13 +283,12 @@ class MainMenuView(View):
     SETTINGS = ButtonOption("Settings", SeedSignerIconConstants.SETTINGS)
 
     def run(self):
-        from seedsigner.gui.screens.screen import MainMenuScreen
         button_data = [self.SCAN, self.SEEDS, self.TOOLS, self.SETTINGS]
-        selected_menu_num = self.run_screen(
-            MainMenuScreen,
-            title=_("Home"),
-            button_data=button_data,
-        )
+        # LVGL screen, dispatched by name: the native main_menu_screen owns its own
+        # 2x2 grid labels/icons (and their localization), so no title/cfg is forwarded.
+        # button_data stays for the index -> Destination mapping below (and the flow
+        # harness), not for the native screen.
+        selected_menu_num = self.run_screen("main_menu_screen", button_data=button_data)
 
         if selected_menu_num == RET_CODE__POWER_BUTTON:
             return Destination(PowerOptionsView)
