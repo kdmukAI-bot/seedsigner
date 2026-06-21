@@ -1,0 +1,90 @@
+name: MicroPython import smoke
+
+# Runtime companion to the static MicroPython compatibility ratchet
+# (mpy-compat.yml). Builds a stock, UNMODIFIED MicroPython 1.27 Unix port — the
+# same v1.27.0 the firmware pins in seedsigner-micropython-builder's
+# deps/micropython/upstream — and actually `import`s every keep-set module on it.
+#
+# This catches runtime/parse incompatibilities the static AST scan cannot see:
+# syntax MicroPython's parser rejects (e.g. complex f-strings), stdlib modules
+# absent from 1.27 core but touched at import time (e.g. `zlib`, replaced by
+# `deflate`), and import-time attribute errors. The keep-set is emitted by
+# `mpy_compat_check.py --list-modules`, so the two gates scan the same files.
+#
+# Modules whose only blocker is a dependency not yet wired into the smoke (embit
+# above all) are reported SKIP, not failure — they light up for free once the
+# dependency lands. On-device (ESP32-P4) remains the final ground truth; this is
+# the fast pre-filter.
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  # Mirror the other workflows: dedupe by PR number, else commit SHA.
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+env:
+  # Stock MicroPython pin — MUST match seedsigner-micropython-builder's
+  # deps/micropython/upstream tag. Compatibility claims are only valid against
+  # unmodified upstream, so this builds from the tag, never the patched tree.
+  MICROPYTHON_REF: v1.27.0
+
+jobs:
+  import-smoke:
+    name: import smoke (stock MicroPython 1.27)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # Match SeedSigner's runtime floor; only used to run --list-modules.
+          python-version: "3.10"
+
+      - name: Install build toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libffi-dev pkg-config
+
+      - name: Cache stock MicroPython Unix port
+        id: cache-mpy
+        uses: actions/cache@v4
+        with:
+          path: micropython
+          key: mpy-unix-coverage-${{ env.MICROPYTHON_REF }}-${{ runner.os }}
+
+      - name: Build stock MicroPython Unix port
+        if: steps.cache-mpy.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$MICROPYTHON_REF" https://github.com/micropython/micropython
+          make -C micropython/ports/unix submodules
+          # The `coverage` variant is the unix port's feature-complete build: it
+          # enables os.uname (with the board/mcu name defines uname needs) and the
+          # broad extmod set the ESP32 target also carries, so the smoke does not
+          # false-fail on features the device has. Modules genuinely absent from
+          # 1.27 core (e.g. zlib -> deflate) stay absent here too, so the smoke
+          # still sees those real incompatibilities.
+          make -C micropython/ports/unix VARIANT=coverage -j"$(nproc)"
+
+      - name: Stage required frozen packages (logging)
+        # The app imports `logging` directly — a REQUIRED_FROZEN_PACKAGES dep the
+        # firmware freezes from official micropython-lib (see mpy_compat_check.py
+        # and docs/micropython_compatibility.md §3). Putting the official package
+        # on the smoke's path resolves module-level `import logging` exactly as
+        # on-device.
+        run: |
+          mkdir -p frozen-stubs
+          cp micropython/lib/micropython-lib/python-stdlib/logging/logging.py frozen-stubs/
+
+      - name: Generate keep-set module list
+        # Single source of truth: the same files the static checker scans.
+        run: python tools/mpy_compat_check.py --list-modules > keepset.txt
+
+      - name: Import smoke
+        run: |
+          BIN=micropython/ports/unix/build-coverage/micropython
+          "$BIN" -c "import sys; print('MicroPython', sys.implementation.version)"
+          "$BIN" tools/mpy_import_smoke.py keepset.txt src frozen-stubs

@@ -1,4 +1,5 @@
 import logging
+from seedsigner.compat import IS_MICROPYTHON
 from seedsigner.compat.l10n import gettext as _
 
 from seedsigner.helpers.l10n import mark_for_translation as _mft
@@ -117,7 +118,13 @@ class View:
         """
         # Import here to avoid circular imports
         from seedsigner.controller import Controller
-        from seedsigner.gui.renderer import Renderer
+        if IS_MICROPYTHON:
+            # Stock MicroPython has no PIL and LVGL owns the panel natively, so
+            # gui.renderer (PIL at module top) can't load. Use the PIL-free
+            # stand-in instead.
+            from seedsigner.gui.lvgl_renderer import LvglRenderer as Renderer
+        else:
+            from seedsigner.gui.renderer import Renderer
 
         self.controller: Controller = Controller.get_instance()
         self.settings = Settings.get_instance()
