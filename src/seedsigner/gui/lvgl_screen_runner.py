@@ -45,9 +45,9 @@ _init_lock = Lock()
 def ensure_lvgl_runtime():
     """Import and initialize the LVGL runtime (idempotent, thread-safe).
 
-    Raises ImportError when the native ``seedsigner_lvgl_screens`` module is absent
-    (dev/CI machines, non-LVGL builds). Callers that must degrade gracefully —
-    the BackgroundImportThread warm-up — wrap this in ``try/except ImportError``.
+    Raises ImportError when neither native module name is present (dev/CI machines,
+    non-LVGL builds). Callers that must degrade gracefully — the
+    BackgroundImportThread warm-up — wrap this in ``try/except ImportError``.
     """
     global _lv, _screensaver_timeout_ms
     if _lv is not None:
@@ -56,7 +56,13 @@ def ensure_lvgl_runtime():
         # Re-check under the lock: another thread may have finished initializing.
         if _lv is not None:
             return
-        import seedsigner_lvgl_screens as lv
+        try:
+            import seedsigner_lvgl_screens as lv
+        except ImportError:
+            # Interim: the ESP32 firmware still registers the pre-rename native
+            # module name. Drop this fallback once the builder renames it to
+            # seedsigner_lvgl_screens (builder docs/rename-native-module.md).
+            import seedsigner_lvgl as lv
         if IS_MICROPYTHON:
             # On-device the native module sets up display + input itself.
             lv.init()
@@ -159,6 +165,23 @@ def run_lvgl_screen(renderer, screen, *, cfg=None, allow_screensaver=True):
     # Resolve a screen passed by name now that _lv is guaranteed initialized.
     screen_fn = getattr(_lv, screen) if isinstance(screen, str) else screen
     args = (cfg,) if cfg is not None else ()
+
+    if IS_MICROPYTHON:
+        # On-device the native screen fn builds the screen and returns immediately;
+        # the native LVGL loop (a separate task) processes touch asynchronously and
+        # queues results. Poll until one appears — mirrors the builder's reference
+        # driver. The native module owns display, input, and its own idle
+        # screensaver, so none of the CPython blended-display machinery below (flush
+        # callback, save/restore_screen, Python-driven screensaver) applies here.
+        import time
+        _lv.clear_result_queue()
+        screen_fn(*args)
+        while True:
+            event = _lv.poll_for_result()
+            if event is not None:
+                return _translate_event(event)
+            time.sleep_ms(20)
+
     timeout_ms = _screensaver_timeout_ms if allow_screensaver else 0
 
     # The screen is BUILT once (the native screen fn builds the widget tree and runs
@@ -175,9 +198,8 @@ def run_lvgl_screen(renderer, screen, *, cfg=None, allow_screensaver=True):
                     _lv.set_flush_mode("python")
                     _lv.set_flush_callback(_make_flush_callback(renderer.disp))
                 _lv.clear_result_queue()
-                if build or IS_MICROPYTHON:
-                    # First render (or MicroPython, whose native screen fn owns its
-                    # own loop): build the screen and run until a result/timeout.
+                if build:
+                    # First render: build the screen and run until a result/timeout.
                     if timeout_ms > 0:
                         screen_fn(*args, wait_timeout_ms=timeout_ms)
                     else:
