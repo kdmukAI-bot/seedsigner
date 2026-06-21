@@ -547,3 +547,37 @@ def test_mpy08_builtin_method_gaps_category_enforced(tmp_path, cat, violation):
     _, result = _result(tmp_path, violation)
     exit_code, _ = mpy.evaluate_severity(result, mpy.load_baseline(str(REAL_BASELINE)))
     assert exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# --list-modules — keep-set emission for the MicroPython import smoke
+#
+# The import-smoke workflow (mpy-import-smoke.yml) gets its module list from
+# `--list-modules`, so the path->module mapping and the keep-set membership are
+# the contract between the two gates. These pin both.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("path,expected", [
+    ("src/seedsigner/models/settings.py", "seedsigner.models.settings"),
+    ("src/seedsigner/compat/__init__.py", "seedsigner.compat"),
+    ("src/seedsigner/gui/constants.py", "seedsigner.gui.constants"),
+    # The leading import root is stripped wherever `src` appears in the path.
+    ("/abs/repo/src/seedsigner/views/view.py", "seedsigner.views.view"),
+])
+def test_path_to_module(path, expected):
+    assert mpy.path_to_module(path) == expected
+
+
+def test_list_modules_matches_keep_set():
+    """--list-modules emits exactly the discovered keep-set, as dotted names."""
+    files = mpy.discover_files(mpy.DEFAULT_SCAN_ROOT)
+    modules = [mpy.path_to_module(f) for f in files]
+    # The force-included PIL-free island is in the smoke set; the excluded gui/
+    # and hardware/ trees are not.
+    assert "seedsigner.gui.constants" in modules
+    assert "seedsigner.compat" in modules
+    assert not any(m.startswith("seedsigner.hardware") for m in modules)
+    assert not any(m == "seedsigner.gui.renderer" for m in modules)
+    # No dupes, no empties.
+    assert "" not in modules
+    assert len(modules) == len(set(modules))
