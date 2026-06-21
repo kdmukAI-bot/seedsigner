@@ -89,6 +89,35 @@ def test_run_lvgl_screen_passes_cfg_to_native_screen(monkeypatch):
     fake_lv.seed_add_passphrase_screen.assert_called_once_with(cfg)
 
 
+def test_run_lvgl_screen_resumes_without_rebuild_after_screensaver(monkeypatch):
+    """After an idle screensaver, the runner PUMPS the restored screen rather than
+    rebuilding it, so the native screen fn is built exactly once and the screen's
+    focus/scroll survive. poll_for_result feeds, in order: the outer build's idle
+    timeout (None), the screensaver's own wake result, then the resumed screen's
+    real selection."""
+    fake_lv = MagicMock()
+    fake_lv.poll_for_result.side_effect = [
+        None,                                # outer main_menu build -> idle timeout
+        ("button_selected", 0, "wake"),      # nested screensaver -> wake press
+        ("button_selected", 3, "Settings"),  # resumed (pumped) screen -> selection
+    ]
+    monkeypatch.setattr(lvgl_screen_runner, "_lv", fake_lv)
+    monkeypatch.setattr(lvgl_screen_runner, "_screensaver_timeout_ms", 120000)
+    monkeypatch.setattr(lvgl_screen_runner, "ensure_lvgl_runtime", lambda: None)
+    monkeypatch.setattr("time.sleep", lambda *a: None)
+
+    result = lvgl_screen_runner.run_lvgl_screen(MagicMock(), "main_menu_screen")
+
+    assert result == 3
+    # Built once (the outer menu); the resume PUMPS instead of rebuilding — this is
+    # the focus-preservation guarantee.
+    fake_lv.main_menu_screen.assert_called_once()
+    assert fake_lv.lvgl_pump.called
+    # The screensaver wrapped the saved/restored screen object.
+    fake_lv.save_screen.assert_called_once()
+    fake_lv.restore_screen.assert_called_once()
+
+
 # ---------------------------------------------------------------------------
 # View.run_screen dispatch seam — class -> PIL, str -> LVGL
 # ---------------------------------------------------------------------------
