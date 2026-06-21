@@ -66,7 +66,7 @@ BEING_REPLACED = {"PIL", "pyzbar", "qrcode", "Pillow"}
 MICROPYTHON_STDLIB = {
     "array", "binascii", "builtins", "cmath", "collections", "errno",
     "gc", "hashlib", "heapq", "io", "json", "math", "os", "random",
-    "re", "select", "socket", "struct", "sys", "time", "zlib",
+    "re", "select", "socket", "struct", "sys", "time",
     "_thread", "micropython", "machine", "network", "esp", "esp32",
     "neopixel", "btree", "framebuf", "uctypes", "uhashlib", "ubinascii",
     "uos", "usys", "utime", "ujson", "ure", "uio", "ucollections",
@@ -112,6 +112,10 @@ SKIP_STDLIB = {
 ABSENT_STDLIB = {
     "datetime", "decimal", "functools", "itertools", "copy", "inspect",
     "warnings", "contextlib", "abc", "secrets", "uuid", "string", "queue",
+    # `zlib` was removed from MicroPython core; `deflate` replaced it (1.27 ships
+    # `deflate`, not `zlib`). Reach it through `compat.zlib` (zlib on CPython,
+    # deflate on-device). Surfaced by the MicroPython import smoke.
+    "zlib",
 }
 
 # `collections` IS present but is a documented SUBSET: only deque, namedtuple,

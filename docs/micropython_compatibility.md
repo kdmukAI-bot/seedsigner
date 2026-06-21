@@ -180,6 +180,14 @@ Avoid these, or vendor a small pure-Python equivalent into the app. *(None are
 used in current in-scope code — this category is a regression guard.)*
 Security-sensitive swaps: `secrets` → `os.urandom(n)`; never use `random` for keys.
 
+**`zlib` — RESOLVED via `compat.zlib`.** MicroPython removed the `zlib` module;
+**1.27 ships `deflate`, not `zlib`** (so `import zlib` raises at runtime — a gap
+the static AST scan missed because the checker had wrongly listed `zlib` as
+core; the MicroPython import smoke surfaced it). The only use is BBQR's raw-DEFLATE
+decompression in `models/decode_qr.py`, now reached through
+`seedsigner/compat/zlib.py` — `zlib.decompressobj` on CPython, `deflate.DeflateIO`
+on-device, both via `__import__(...)` so the guarded refs stay checker-invisible.
+
 ## B. Language & syntax differences
 
 ### §2 Type annotations — `typing` import & executed generics — *Detection: static*
