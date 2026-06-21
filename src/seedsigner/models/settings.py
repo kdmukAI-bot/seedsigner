@@ -33,7 +33,7 @@ class Settings(Singleton):
         # This is the only way to access the one and only instance
         if cls._instance is None:
             # Instantiate the one and only instance
-            settings = cls.__new__(cls)
+            settings = object.__new__(cls)
             cls._instance = settings
 
             settings._data = SettingsDefinition.get_defaults()
