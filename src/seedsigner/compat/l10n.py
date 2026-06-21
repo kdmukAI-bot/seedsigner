@@ -60,15 +60,19 @@ def set_locale(locale):
     CPython's `gettext.find()` consults the interpreter's environment mapping, so
     on Pi Zero the value must be written there (reached via `getattr(os, ...)` to
     keep this guarded reference out of the category-18 line check, mirroring the
-    `__import__("gettext")` trick above). Stock MicroPython 1.27 has no such
-    mapping — it exposes `os.putenv()` instead — and there are no `.mo` catalogs
-    to select on-device, so that path is a forward-compatible no-op in practice.
+    `__import__("gettext")` trick above). Stock MicroPython 1.27 on ESP32 exposes
+    neither an `environ` mapping nor a `putenv` (both reached via `getattr` to stay
+    invisible to that same check), and there are no `.mo` catalogs to select
+    on-device (device i18n runs through LVGL, not gettext), so when both are absent
+    this is a no-op.
     """
     environ = getattr(os, "environ", None)
     if environ is not None:
         environ["LANGUAGE"] = locale
-    else:
-        os.putenv("LANGUAGE", locale)
+        return
+    putenv = getattr(os, "putenv", None)
+    if putenv is not None:
+        putenv("LANGUAGE", locale)
 
 
 if _gettext is not None:
