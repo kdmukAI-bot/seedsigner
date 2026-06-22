@@ -7,6 +7,12 @@ src/seedsigner/version.json
 src/seedsigner/models/settings_definition.json
 .idea
 .coverage*
-
+.venv
+.claude/
 *.po
 *.mo
+
+# WIP integration plan/strategy docs — AI-assisted dev scaffolding kept working-tree-only.
+# The seedsigner fork is the shared collaboration point; these must not enter the history
+# that gets extracted upstream.
+docs/_integration/
