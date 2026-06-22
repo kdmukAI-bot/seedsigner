@@ -75,9 +75,11 @@ class BackgroundImportThread(BaseThread):
         Controller.get_instance()._storage = SeedStorage()
 
         if not IS_MICROPYTHON:
-            # CPython-only warm-ups: numpy + the camera stream, and the view modules
-            # whose lazy PIL/camera imports would fail on MicroPython (those screens
-            # route to the not-implemented notice on-device, so warming them is moot).
+            # CPython-only warm-ups: numpy, the camera stream, and the menu view
+            # modules. The view modules aren't pre-warmed on MicroPython because
+            # importing their deep dependency chain on this background thread overflows
+            # its small secondary-thread stack; there, the first navigation imports
+            # them lazily on the main thread instead.
             time_import('numpy')  # used by PiVideoStream; by far the slowest import (2.29s)
             time_import('seedsigner.hardware.pivideostream')
 

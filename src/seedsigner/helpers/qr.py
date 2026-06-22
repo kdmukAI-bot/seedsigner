@@ -1,8 +1,7 @@
-import qrcode
-from qrcode.image.styledpil import StyledPilImage
-from qrcode.image.styles.moduledrawers import CircleModuleDrawer, GappedSquareModuleDrawer
-from PIL import Image, ImageDraw
-import subprocess
+# qrcode + PIL + subprocess are imported lazily inside the methods below. This
+# PIL-based QR-image path can't run on MicroPython (no PIL/qrcode there), so keeping
+# the imports out of module scope lets this module load on-device; QR *generation*
+# itself is deferred until a native QR-code library is integrated.
 
 class QR:
     STYLE__DEFAULT = 1
@@ -13,6 +12,10 @@ class QR:
         return
 
     def qrimage(self, data, width=240, height=240, border=3, style=None, background_color="#444"):
+        import qrcode
+        from qrcode.image.styledpil import StyledPilImage
+        from qrcode.image.styles.moduledrawers import CircleModuleDrawer, GappedSquareModuleDrawer
+        from PIL import ImageDraw
         box_size = 5
         qr = qrcode.QRCode( version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=box_size, border=border )
         qr.add_data(data)
@@ -91,6 +94,8 @@ class QR:
 
 
     def qrimage_io(self, data, width=240, height=240, border=3, background_color="808080"):
+        import subprocess
+        from PIL import Image
         if 1 <= border <= 10:
             border_str = str(border)
         else:

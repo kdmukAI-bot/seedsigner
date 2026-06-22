@@ -34,8 +34,6 @@ class SeedsMenuView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import ButtonListScreen
-
         if not self.seeds:
             # Nothing to do here unless we have a seed loaded
             return Destination(LoadSeedView, clear_history=True)
@@ -46,7 +44,7 @@ class SeedsMenuView(View):
         button_data.append(self.LOAD)
 
         selected_menu_num = self.run_screen(
-            ButtonListScreen,
+            "button_list_screen",
             title=_("In-Memory Seeds"),
             is_button_text_centered=False,
             button_data=button_data
@@ -167,8 +165,6 @@ class LoadSeedView(View):
     CREATE = ButtonOption("Create a seed", SeedSignerIconConstants.PLUS)
 
     def run(self):
-        from seedsigner.gui.screens.screen import ButtonListScreen
-
         button_data = [
             self.SEED_QR,
             self.TYPE_12WORD,
@@ -181,7 +177,7 @@ class LoadSeedView(View):
         button_data.append(self.CREATE)
 
         selected_menu_num = self.run_screen(
-            ButtonListScreen,
+            "button_list_screen",
             title=_("Load a Seed"),
             is_button_text_centered=False,
             button_data=button_data
@@ -659,15 +655,13 @@ class SeedBackupView(View):
     
 
     def run(self):
-        from seedsigner.gui.screens.screen import ButtonListScreen
-
         button_data = [self.VIEW_WORDS]
 
         if self.seed.seedqr_supported:
             button_data.append(self.EXPORT_SEEDQR)
 
         selected_menu_num = self.run_screen(
-            ButtonListScreen,
+            "button_list_screen",
             title=_("Backup Seed"),
             button_data=button_data,
             is_bottom_list=True,
@@ -697,8 +691,6 @@ class SeedExportXpubSigTypeView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import ButtonListScreen
-
         if len(self.settings.get_value(SettingsConstants.SETTING__SIG_TYPES)) == 1:
             # Nothing to select; skip this screen
             return Destination(SeedExportXpubScriptTypeView, view_args={"seed_num": self.seed_num, "sig_type": self.settings.get_value(SettingsConstants.SETTING__SIG_TYPES)[0]}, skip_current_view=True)
@@ -706,7 +698,7 @@ class SeedExportXpubSigTypeView(View):
         button_data = [self.SINGLE_SIG, self.MULTISIG]
 
         selected_menu_num = self.run_screen(
-            ButtonListScreen,
+            "button_list_screen",
             title=_("Export Xpub"),
             button_data=button_data
         )
@@ -726,7 +718,6 @@ class SeedExportXpubScriptTypeView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import ButtonListScreen
         from seedsigner.controller import Controller
         from .tools_views import ToolsAddressExplorerAddressTypeView
         args = {"seed_num": self.seed_num, "sig_type": self.sig_type}
@@ -760,7 +751,7 @@ class SeedExportXpubScriptTypeView(View):
                 button_data.append(ButtonOption(display_name, return_data=script_type))
 
         selected_menu_num = self.run_screen(
-            ButtonListScreen,
+            "button_list_screen",
             title=title,
             is_button_text_centered=False,
             button_data=button_data,
@@ -836,8 +827,6 @@ class SeedExportXpubQRFormatView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import ButtonListScreen
-
         args = {
             "seed_num": self.seed_num,
             "sig_type": self.sig_type,
@@ -854,7 +843,7 @@ class SeedExportXpubQRFormatView(View):
             button_data.append(ButtonOption(display_name, return_data=setting_option))
 
         selected_menu_num = self.run_screen(
-            ButtonListScreen,
+            "button_list_screen",
             title=_("Xpub QR Format"),
             is_button_text_centered=False,
             button_data=button_data,
@@ -1158,12 +1147,10 @@ class SeedBIP85SelectNumWordsView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import ButtonListScreen
-
         button_data = [self.WORDS_12, self.WORDS_24]
 
         selected_menu_num = self.run_screen(
-            ButtonListScreen,
+            "button_list_screen",
             title=_("BIP-85 Num Words"),
             button_data=button_data
         )
@@ -1315,7 +1302,6 @@ class SeedWordsBackupTestView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import ButtonListScreen
         from embit import bip39
 
         if self.rand_seed is not None:
@@ -1337,7 +1323,7 @@ class SeedWordsBackupTestView(View):
         # TRANSLATOR_NOTE: Inserts the word number (e.g. "Verify Word #1")
         title = _("Verify Word #{}").format(self.cur_index + 1)
         selected_menu_num = self.run_screen(
-            ButtonListScreen,
+            "button_list_screen",
             title=title,
             show_back_button=False,
             button_data=button_data,

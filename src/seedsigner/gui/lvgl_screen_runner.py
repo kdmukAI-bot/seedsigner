@@ -164,6 +164,18 @@ def run_lvgl_screen(renderer, screen, *, cfg=None, allow_screensaver=True):
     ensure_lvgl_runtime()
     # Resolve a screen passed by name now that _lv is guaranteed initialized.
     screen_fn = getattr(_lv, screen) if isinstance(screen, str) else screen
+
+    # Serialize any ButtonOptions in the cfg's button_list into their native (string)
+    # form just before the native call. Screen-agnostic: every screen that carries a
+    # button_list (button_list_screen, large_icon_status_screen, ...) gets the same
+    # treatment, with no per-screen branching. Duck-typed via to_lvgl(); entries that
+    # are already plain strings pass through. Copy the dict so the caller's cfg (which
+    # may hold live ButtonOptions used elsewhere) is never mutated.
+    if isinstance(cfg, dict) and cfg.get("button_list"):
+        cfg = dict(cfg)
+        cfg["button_list"] = [b.to_lvgl() if hasattr(b, "to_lvgl") else b
+                              for b in cfg["button_list"]]
+
     args = (cfg,) if cfg is not None else ()
 
     if IS_MICROPYTHON:
