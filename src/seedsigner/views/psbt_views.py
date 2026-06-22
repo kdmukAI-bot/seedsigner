@@ -17,8 +17,6 @@ class PSBTSelectSeedView(View):
 
     def run(self):
         from seedsigner.controller import Controller
-        from seedsigner.gui.screens.screen import ButtonListScreen
-
         # Note: we can't just autoroute to the PSBT Overview because we might have a
         # multisig where we want to sign with more than one key on this device.
         if not self.controller.psbt:
@@ -48,7 +46,7 @@ class PSBTSelectSeedView(View):
             button_data.append(self.TYPE_ELECTRUM)
 
         selected_menu_num = self.run_screen(
-            ButtonListScreen,
+            "button_list_screen",
             title=_("Select Signer"),
             is_button_text_centered=False,
             button_data=button_data

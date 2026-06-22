@@ -64,12 +64,26 @@ class ButtonOption:
         )
 
 
+    def to_lvgl(self):
+        """Serialize this option for a native LVGL screen's button list.
+
+        Text-only for now (the translated label); per-button icon support is
+        pending — see the seedsigner-lvgl-screens ``button_list_screen`` TODO.
+        Mirrors the PIL ``Button`` render path, which wraps the label in ``_()``.
+        """
+        return _(self.button_label)
+
+
 
 class ButtonOptionWithoutTranslation(ButtonOption):
     """
     Same as ButtonOption but does NOT translate button_label or active_button_label.
     The labels are also not extracted for translation by babel.
     """
+
+    def to_lvgl(self):
+        # No translation, matching the PIL render path for this subclass.
+        return self.button_label
 
 
 
@@ -209,9 +223,16 @@ class View:
             self.screen = screen(**kwargs)
             return self.screen.display()
 
-        # LVGL screen (by name). Imported lazily so Views never pull the native
-        # module in, and so this stays out of the module-level import graph that
-        # must load on MicroPython.
+        # LVGL screen (by name). A plain ButtonOption menu (button_list_screen) is
+        # dispatched with the same kwargs the PIL ButtonListScreen took; assemble its
+        # native cfg here so Views never build it. The title+button_data signature is
+        # the discriminator: main_menu_screen passes button_data (for the flow harness)
+        # but no title, so it correctly stays cfg-less.
+        if lvgl_cfg is None and "title" in kwargs and "button_data" in kwargs:
+            lvgl_cfg = button_list_lvgl_cfg(**kwargs)
+
+        # Imported lazily so Views never pull the native module in, and so this stays
+        # out of the module-level import graph that must load on MicroPython.
         from seedsigner.gui.lvgl_screen_runner import run_lvgl_screen
         return run_lvgl_screen(self.renderer, screen, cfg=lvgl_cfg, allow_screensaver=allow_screensaver)
 
@@ -405,10 +426,48 @@ def not_implemented_lvgl_cfg(text: str) -> dict:
             "show_power_button": False,
         },
         "status_type": "warning",
+        # A not-yet-migrated screen is informational, not a hazard — keep the
+        # warning icon/headline but suppress the pulsing colored edge overlay
+        # (which "warning" enables by default).
+        "warning_edges": False,
         "status_headline": _("Not Yet Implemented"),
         "text": text,
         "button_list": [_("Back to main menu")],
     }
+
+
+def button_list_lvgl_cfg(
+    *,
+    title: str,
+    button_data: list,
+    show_back_button: bool = True,
+    is_bottom_list: bool = False,
+    selected_button: int = 0,
+    is_button_text_centered: bool = None,   # accepted for call-site parity; the native
+                                            # button_list_screen has no per-screen text
+                                            # centering control yet — currently a no-op.
+    scroll_y_initial_offset: int = None,    # PIL pixel-scroll; the native screen restores
+                                            # position via selected_button -> initial_selected_index.
+) -> dict:
+    """Assemble a native ``button_list_screen`` config from the kwargs a View passed
+    to ``run_screen`` (the same arguments the PIL ``ButtonListScreen`` took).
+
+    Called by ``View.run_screen``, NOT by Views — Views stay free of the native
+    config shape. This nests the ``TopNav`` fields the native schema requires
+    (``_(title)`` mirrors the PIL ``TopNav``'s ``_(self.title)``) and maps
+    ``selected_button -> initial_selected_index``. The ``button_data`` options are
+    left as-is here; ``run_lvgl_screen`` serializes them (``ButtonOption.to_lvgl()``)
+    just before the native call, screen-agnostically, so every screen's button list
+    gets the same treatment. PIL-only kwargs have no native equivalent yet (ignored).
+    """
+    cfg = {
+        "top_nav": {"title": _(title), "show_back_button": show_back_button},
+        "button_list": list(button_data),   # raw ButtonOptions; serialized in run_lvgl_screen
+        "is_bottom_list": is_bottom_list,
+    }
+    if selected_button:
+        cfg["initial_selected_index"] = selected_button
+    return cfg
 
 
 class NotYetImplementedView(View):

@@ -28,8 +28,6 @@ class SettingsMenuView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import ButtonListScreen
-
         settings_entries = SettingsDefinition.get_settings_entries(
             visibility=self.visibility
         )
@@ -71,7 +69,7 @@ class SettingsMenuView(View):
                     break
 
         selected_menu_num = self.run_screen(
-            ButtonListScreen,
+            "button_list_screen",
             title=title,
             is_button_text_centered=False,
             button_data=button_data,
@@ -79,8 +77,10 @@ class SettingsMenuView(View):
             scroll_y_initial_offset=self.initial_scroll,
         )
 
-        # Preserve our scroll position in this Screen so we can return
-        initial_scroll = self.screen.buttons[0].scroll_y
+        # The native button_list_screen restores position via selected_button
+        # (initial_selected_index); it exposes no PIL pixel-scroll to read back, so
+        # the parent_initial_scroll plumbing below is inert on the native path.
+        initial_scroll = 0
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
             if self.visibility == SettingsConstants.VISIBILITY__GENERAL:

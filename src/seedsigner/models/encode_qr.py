@@ -13,8 +13,8 @@ from seedsigner.helpers.qr import QR
 from seedsigner.models.seed import Seed
 from seedsigner.models.settings import SettingsConstants
 
-from urtypes.crypto import PSBT as UR_PSBT
-from urtypes.crypto import Account, HDKey, Output, Keypath, PathComponent, SCRIPT_EXPRESSION_TAG_MAP, CoinInfo
+# urtypes.crypto is imported lazily inside the UR encoder classes below (it isn't
+# available on MicroPython); the UR-format QR-encode path is deferred there.
 
 
 
@@ -352,6 +352,8 @@ class UrXpubQrEncoder(BaseFountainQrEncoder):
         self.sig_type = sig_type
         super().__init__(**kwargs)
 
+        from urtypes.crypto import Account, HDKey, Output, Keypath, PathComponent, SCRIPT_EXPRESSION_TAG_MAP, CoinInfo
+
         xd = build_xpub_data(self.seed, self.derivation, self.network, self.sig_type)
 
         def derivation_to_keypath(path: str) -> list:
@@ -425,5 +427,6 @@ class UrPsbtQrEncoder(BaseFountainQrEncoder):
     def __init__(self, psbt: PSBT = None, **kwargs):
         self.psbt = psbt
         super().__init__(**kwargs)
+        from urtypes.crypto import PSBT as UR_PSBT
         qr_ur_bytes = UR("crypto-psbt", UR_PSBT(self.psbt.serialize()).to_cbor())
         self.ur2_encode = UREncoder(ur=qr_ur_bytes, max_fragment_len=self.qr_max_fragment_size)
