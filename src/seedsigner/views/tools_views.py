@@ -24,12 +24,10 @@ class ToolsMenuView(View):
     VERIFY_ADDRESS = ButtonOption("Verify address")
 
     def run(self):
-        from seedsigner.gui.screens.screen import ButtonListScreen
-
         button_data = [self.IMAGE, self.DICE, self.KEYBOARD, self.ADDRESS_EXPLORER, self.VERIFY_ADDRESS]
 
         selected_menu_num = self.run_screen(
-            ButtonListScreen,
+            "button_list_screen",
             title=_("Tools"),
             is_button_text_centered=False,
             button_data=button_data
@@ -123,12 +121,10 @@ class ToolsImageEntropyMnemonicLengthView(View):
     TWENTYFOUR_WORDS = ButtonOption("24 words", return_data=24)
 
     def run(self):
-        from seedsigner.gui.screens.screen import ButtonListScreen
-
         button_data = [self.TWELVE_WORDS, self.TWENTYFOUR_WORDS]
 
         selected_menu_num = self.run_screen(
-            ButtonListScreen,
+            "button_list_screen",
             title=_("Mnemonic Length"),
             button_data=button_data,
         )
@@ -207,8 +203,6 @@ class ToolsImageEntropyMnemonicLengthView(View):
 ****************************************************************************"""
 class ToolsDiceEntropyMnemonicLengthView(View):
     def run(self):
-        from seedsigner.gui.screens.screen import ButtonListScreen
-
         # Since we're dynamically building the ButtonOption button_labels here, it's too
         # awkward to use the usual class-level attr approach.
 
@@ -222,7 +216,7 @@ class ToolsDiceEntropyMnemonicLengthView(View):
 
         button_data = [TWELVE, TWENTY_FOUR]
         selected_menu_num = self.run_screen(
-            ButtonListScreen,
+            "button_list_screen",
             title=_("Mnemonic Length"),
             is_bottom_list=True,
             is_button_text_centered=True,
@@ -275,12 +269,10 @@ class ToolsCalcFinalWordNumWordsView(View):
     TWENTY_FOUR = ButtonOption("24 words", return_data=24)
 
     def run(self):
-        from seedsigner.gui.screens.screen import ButtonListScreen
-
         button_data = [self.TWELVE, self.TWENTY_FOUR]
 
         selected_menu_num = self.run_screen(
-            ButtonListScreen,
+            "button_list_screen",
             title=_("Mnemonic Length"),
             is_bottom_list=True,
             is_button_text_centered=True,
@@ -490,8 +482,6 @@ class ToolsAddressExplorerSelectSourceView(View):
 
     def run(self):
         from seedsigner.controller import Controller
-        from seedsigner.gui.screens.screen import ButtonListScreen
-
         seeds = self.controller.storage.seeds
         button_data = []
         for seed in seeds:
@@ -502,7 +492,7 @@ class ToolsAddressExplorerSelectSourceView(View):
             button_data.append(self.TYPE_ELECTRUM)
 
         selected_menu_num = self.run_screen(
-            ButtonListScreen,
+            "button_list_screen",
             title=_("Address Explorer"),
             button_data=button_data,
             is_button_text_centered=False,
