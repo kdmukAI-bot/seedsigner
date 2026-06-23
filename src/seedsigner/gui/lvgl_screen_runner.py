@@ -13,13 +13,23 @@ Two render models, one runner:
   * CPython / Pi Zero — "blended display": LVGL renders through SeedSigner's
     existing ST7789 SPI driver via a Python flush callback, sharing the panel
     with the PIL screens. ``Renderer.lock`` is held around the render so PIL and
-    LVGL never write concurrently.
-  * MicroPython / ESP32 — the native module owns the display, so there is no
-    Python flush callback; the ``not IS_MICROPYTHON`` guards skip that setup.
+    LVGL never write concurrently. Nothing pumps LVGL in the background, so this
+    runner pumps it itself between polls.
+  * MicroPython / ESP32 — the native module owns the display and pumps LVGL on a
+    separate task, so there is no Python flush callback and no Python-side pump;
+    the ``not IS_MICROPYTHON`` guards skip that setup and this runner only polls.
 
-Screensaver: an LVGL screen activates the screensaver after the configured idle
-timeout by default. Screens that must stay up (e.g. camera scanning) pass
-``allow_screensaver=False``.
+Both platforms follow one contract: the native screen function is a pure builder
+(it builds the widget tree and returns immediately) and a Python loop polls for the
+result.
+
+Screensaver: the native overlay manager owns the idle screensaver on both
+platforms. A C dispatcher watches the LVGL inactivity timer and swaps to / restores
+from the bouncing-logo screensaver entirely in C — nothing in Python drives it. The
+global timeout is handed to the native side once at init (``set_screensaver_timeout``).
+Per-screen opt-out rides in the cfg as ``allow_screensaver``: a View sets it False
+for screens that must stay up (e.g. camera scanning), the shared parser defaults it
+true, and the native scaffold stamps the screen object so the dispatcher skips it.
 """
 import array
 import logging
@@ -75,6 +85,12 @@ def ensure_lvgl_runtime():
         from seedsigner.controller import Controller
         _screensaver_timeout_ms = Controller.get_instance().screensaver_activation_ms
 
+        # Hand the idle timeout to the native overlay manager, which owns the
+        # screensaver on both platforms (it watches the LVGL inactivity timer and
+        # swaps to / restores from the screensaver itself). Set once here; nothing
+        # in Python drives the screensaver after this.
+        lv.set_screensaver_timeout(_screensaver_timeout_ms)
+
         # Publish _lv last: until it is set, other threads keep waiting on the
         # lock rather than seeing a partially-initialized runtime.
         _lv = lv
@@ -121,27 +137,6 @@ def _translate_event(event):
     return index
 
 
-def _pump_until_result(timeout_ms):
-    """Drive the LVGL cycle on the *current* (already-built) screen until a result
-    is queued or ``timeout_ms`` ms elapse (0 = run until a result).
-
-    Built on the public ``lvgl_pump`` (which runs ``lv_timer_handler`` for a short
-    slice) so that a screen restored after the screensaver resumes *in place* — its
-    focus/scroll intact — instead of being rebuilt from config, which would reset
-    focus to the default button. Mirrors the native run-until-result loop that the
-    one-shot screen functions use internally. CPython/blended path only.
-    """
-    import time
-    deadline = None if timeout_ms == 0 else time.time() + timeout_ms / 1000.0
-    while True:
-        _lv.lvgl_pump(5, 1)
-        event = _lv.poll_for_result()
-        if event is not None:
-            return event
-        if deadline is not None and time.time() >= deadline:
-            return None
-
-
 def run_lvgl_screen(renderer, screen, *, cfg=None, allow_screensaver=True):
     """Run an LVGL screen while holding the renderer lock; return its result.
 
@@ -153,8 +148,9 @@ def run_lvgl_screen(renderer, screen, *, cfg=None, allow_screensaver=True):
             runtime exists. A callable is still accepted for direct use.
         cfg: Optional JSON-style config dict handed to the native screen as its
             single positional argument (screens that take no config omit it).
-        allow_screensaver: If True (default), activate the screensaver after the
-            global idle timeout; set False for screens that must stay up.
+        allow_screensaver: If True (default), the native overlay manager may run
+            the idle screensaver over this screen; set False for screens that must
+            stay up. Carried to the native side via ``cfg["allow_screensaver"]``.
 
     Returns:
         A SeedSigner-compatible return code (int index, RET_CODE constant, or a
@@ -165,26 +161,43 @@ def run_lvgl_screen(renderer, screen, *, cfg=None, allow_screensaver=True):
     # Resolve a screen passed by name now that _lv is guaranteed initialized.
     screen_fn = getattr(_lv, screen) if isinstance(screen, str) else screen
 
-    # Serialize any ButtonOptions in the cfg's button_list into their native (string)
-    # form just before the native call. Screen-agnostic: every screen that carries a
-    # button_list (button_list_screen, large_icon_status_screen, ...) gets the same
-    # treatment, with no per-screen branching. Duck-typed via to_lvgl(); entries that
-    # are already plain strings pass through. Copy the dict so the caller's cfg (which
-    # may hold live ButtonOptions used elsewhere) is never mutated.
-    if isinstance(cfg, dict) and cfg.get("button_list"):
+    # Copy any dict cfg so the caller's cfg (which may hold live ButtonOptions used
+    # elsewhere) is never mutated, then stamp the per-screen policy and serialize
+    # button options on the copy.
+    if isinstance(cfg, dict):
         cfg = dict(cfg)
-        cfg["button_list"] = [b.to_lvgl() if hasattr(b, "to_lvgl") else b
-                              for b in cfg["button_list"]]
+        # Per-screen screensaver policy rides in the cfg JSON: the shared parser
+        # reads the key (defaulting absent to allowed) and the native scaffold
+        # stamps the screen object so the overlay dispatcher skips it. Cfg-less
+        # screens (e.g. main_menu) carry no dict and fall through to the default.
+        cfg["allow_screensaver"] = allow_screensaver
+        # Serialize any ButtonOptions in the button_list into their native (string)
+        # form. Screen-agnostic: every screen that carries a button_list
+        # (button_list_screen, large_icon_status_screen, ...) gets the same
+        # treatment. Duck-typed via to_lvgl(); plain strings pass through.
+        if cfg.get("button_list"):
+            cfg["button_list"] = [b.to_lvgl() if hasattr(b, "to_lvgl") else b
+                                  for b in cfg["button_list"]]
 
     args = (cfg,) if cfg is not None else ()
 
+    # One contract, two mechanics. On both platforms the native screen fn is a pure
+    # builder — it builds the widget tree and returns immediately — and a Python loop
+    # polls for the result; the native overlay manager owns the screensaver. The
+    # branches differ only in how LVGL gets pumped, not in architecture: MicroPython's
+    # native task pumps LVGL and owns the display, so Python only polls; CPython still
+    # shares the panel with the legacy PIL pipeline (the blended display), so this
+    # runner pumps LVGL itself under renderer.lock and routes frames through the PIL
+    # driver's flush callback. That blended-display coupling is the last transitional
+    # difference — at the PIL-screen cutover the Pi native layer will own the display
+    # and pump in the background like the ESP32 task already does, and the two branches
+    # become one.
     if IS_MICROPYTHON:
-        # On-device the native screen fn builds the screen and returns immediately;
-        # the native LVGL loop (a separate task) processes touch asynchronously and
-        # queues results. Poll until one appears — mirrors the builder's reference
-        # driver. The native module owns display, input, and its own idle
-        # screensaver, so none of the CPython blended-display machinery below (flush
-        # callback, save/restore_screen, Python-driven screensaver) applies here.
+        # The native LVGL loop (a separate task) processes input asynchronously and
+        # queues results; poll until one appears. The native module owns display,
+        # input, the pump, and its own idle screensaver, so none of the CPython
+        # blended-display machinery below (flush callback, renderer.lock, Python-side
+        # pump) applies here.
         import time
         _lv.clear_result_queue()
         screen_fn(*args)
@@ -194,72 +207,30 @@ def run_lvgl_screen(renderer, screen, *, cfg=None, allow_screensaver=True):
                 return _translate_event(event)
             time.sleep_ms(20)
 
-    timeout_ms = _screensaver_timeout_ms if allow_screensaver else 0
-
-    # The screen is BUILT once (the native screen fn builds the widget tree and runs
-    # its event loop). After an idle-timeout screensaver we RESUME the same screen by
-    # pumping its event loop in place — rebuilding would reset focus to the default
-    # button. save_screen/restore_screen keep that screen object alive across the
-    # screensaver so the pump has a live screen to resume.
-    build = True
+    # CPython / Pi Zero blended display. Build the screen once, then pump LVGL and
+    # poll in a loop, holding renderer.lock around each pump so PIL and LVGL never
+    # write the panel concurrently. The native overlay dispatcher fires inside the
+    # pump (lv_timer_handler), so the screensaver activates/restores on its own with
+    # nothing to do here. Releasing the lock and sleeping briefly between pumps hands
+    # the GIL back to background threads (the PIL-era cooperative model).
+    import time
     try:
+        with renderer.lock:
+            # Blended display: route LVGL pixels through the PIL driver.
+            _lv.set_flush_mode("python")
+            _lv.set_flush_callback(_make_flush_callback(renderer.disp))
+            _lv.clear_result_queue()
+            screen_fn(*args)
         while True:
             with renderer.lock:
-                if not IS_MICROPYTHON:
-                    # Blended display: route LVGL pixels through the PIL driver.
-                    _lv.set_flush_mode("python")
-                    _lv.set_flush_callback(_make_flush_callback(renderer.disp))
-                _lv.clear_result_queue()
-                if build:
-                    # First render: build the screen and run until a result/timeout.
-                    if timeout_ms > 0:
-                        screen_fn(*args, wait_timeout_ms=timeout_ms)
-                    else:
-                        screen_fn(*args)
-                    event = _lv.poll_for_result()
-                else:
-                    # Resume the screen restored after the screensaver (focus/scroll
-                    # intact) by pumping its event loop — no rebuild.
-                    event = _pump_until_result(timeout_ms)
-
+                _lv.lvgl_pump(5, 1)
+                event = _lv.poll_for_result()
             if event is not None:
                 # Reset the PIL-side input timer so returning to a PIL screen
-                # doesn't immediately re-trigger the screensaver.
+                # doesn't immediately re-trigger the PIL screensaver.
                 from seedsigner.hardware.buttons import HardwareButtons
                 HardwareButtons.get_instance().update_last_input_time()
                 return _translate_event(event)
-
-            if timeout_ms == 0:
-                # No screensaver requested and no result: nothing left to wait on.
-                return None
-
-            # Idle timeout fired: run the screensaver over the saved screen, then
-            # loop back to resume that same screen via the pump branch above.
-            _lv.save_screen()
-            try:
-                lvgl_screensaver_screen(renderer)
-            finally:
-                _lv.restore_screen()
-            # Debounce: let the wakeup press release so it doesn't register as
-            # input on the resumed screen.
-            import time
-            time.sleep(0.25)
-            build = False
+            time.sleep(0.005)
     finally:
-        if not IS_MICROPYTHON:
-            _lv.set_flush_callback(None)
-
-
-def lvgl_screensaver_screen(renderer):
-    """Run the LVGL screensaver (bouncing logo); blocks until any input.
-
-    Invoked only from an LVGL screen's idle timeout in ``run_lvgl_screen`` above,
-    wrapped in ``save_screen``/``restore_screen``. Repainting the screen the
-    screensaver covered is that caller's job: it restores its saved LVGL screen
-    and re-renders on the next loop iteration. This function deliberately does not
-    touch the PIL canvas — on the blended display the canvas holds the last *PIL*
-    screen drawn (e.g. a menu visited before the LVGL screen took over via
-    ``blit_rgb565``), so re-showing it here would flash that stale frame for a
-    moment on wake before the LVGL screen repaints.
-    """
-    run_lvgl_screen(renderer, "screensaver_screen", allow_screensaver=False)
+        _lv.set_flush_callback(None)
