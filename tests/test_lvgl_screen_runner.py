@@ -3,8 +3,9 @@ the `View.run_screen` dispatch seam.
 
 Foundation A is inert — no View renders an LVGL screen yet — so these tests drive
 the runner directly with a faked native module. They cover the CPython
-(blended-display) path; the MicroPython branch (`IS_MICROPYTHON`) only skips the
-flush-callback setup and is exercised on-device.
+(blended-display) path; the MicroPython branch (`IS_MICROPYTHON`) skips the flush
+callback, the renderer lock, and the Python-side pump (the native task pumps LVGL),
+and is exercised on-device.
 
 No `tests/base.py` scaffolding is needed; the runner has no Controller/Renderer
 dependency beyond what the test injects. The native `HardwareButtons` import (lazy,
@@ -73,7 +74,10 @@ def test_run_lvgl_screen_returns_translated_result(monkeypatch):
     fake_lv.main_menu_screen.assert_called_once_with()
 
 
-def test_run_lvgl_screen_passes_cfg_to_native_screen(monkeypatch):
+def test_run_lvgl_screen_injects_allow_screensaver_into_cfg(monkeypatch):
+    """The per-screen policy rides in the cfg the native screen receives (the parser
+    reads it; the scaffold stamps the screen object), and the caller's dict is left
+    untouched — the runner copies before stamping."""
     fake_lv = MagicMock()
     fake_lv.poll_for_result.return_value = ("text_entered", -1, "abc")
     monkeypatch.setattr(lvgl_screen_runner,"_lv", fake_lv)
@@ -86,36 +90,35 @@ def test_run_lvgl_screen_passes_cfg_to_native_screen(monkeypatch):
     )
 
     assert result == "abc"
-    fake_lv.seed_add_passphrase_screen.assert_called_once_with(cfg)
+    fake_lv.seed_add_passphrase_screen.assert_called_once_with(
+        {"initial_text": "", "allow_screensaver": False})
+    assert cfg == {"initial_text": ""}  # caller's dict not mutated
 
 
-def test_run_lvgl_screen_resumes_without_rebuild_after_screensaver(monkeypatch):
-    """After an idle screensaver, the runner PUMPS the restored screen rather than
-    rebuilding it, so the native screen fn is built exactly once and the screen's
-    focus/scroll survive. poll_for_result feeds, in order: the outer build's idle
-    timeout (None), the screensaver's own wake result, then the resumed screen's
-    real selection."""
+def test_run_lvgl_screen_builds_once_then_pumps_for_result(monkeypatch):
+    """The native screen fn is a pure builder: the runner builds it exactly once —
+    with NO wait_timeout_ms kwarg (the bug that crashed button_list_screen) — then
+    pumps LVGL and polls until a result appears. The native overlay manager owns the
+    screensaver, so there is no Python-side save/restore. poll_for_result feeds: no
+    result yet (pump again), then a real selection."""
     fake_lv = MagicMock()
     fake_lv.poll_for_result.side_effect = [
-        None,                                # outer main_menu build -> idle timeout
-        ("button_selected", 0, "wake"),      # nested screensaver -> wake press
-        ("button_selected", 3, "Settings"),  # resumed (pumped) screen -> selection
+        None,                                # first poll: nothing yet -> pump again
+        ("button_selected", 3, "Settings"),  # second poll: a selection
     ]
     monkeypatch.setattr(lvgl_screen_runner, "_lv", fake_lv)
-    monkeypatch.setattr(lvgl_screen_runner, "_screensaver_timeout_ms", 120000)
     monkeypatch.setattr(lvgl_screen_runner, "ensure_lvgl_runtime", lambda: None)
     monkeypatch.setattr("time.sleep", lambda *a: None)
 
     result = lvgl_screen_runner.run_lvgl_screen(MagicMock(), "main_menu_screen")
 
     assert result == 3
-    # Built once (the outer menu); the resume PUMPS instead of rebuilding — this is
-    # the focus-preservation guarantee.
-    fake_lv.main_menu_screen.assert_called_once()
-    assert fake_lv.lvgl_pump.called
-    # The screensaver wrapped the saved/restored screen object.
-    fake_lv.save_screen.assert_called_once()
-    fake_lv.restore_screen.assert_called_once()
+    # Built exactly once, cfg-less -> no args, hence no wait_timeout_ms kwarg.
+    fake_lv.main_menu_screen.assert_called_once_with()
+    assert fake_lv.lvgl_pump.called  # pumped until the result appeared
+    # The native overlay manager owns the screensaver now — no Python save/restore.
+    fake_lv.save_screen.assert_not_called()
+    fake_lv.restore_screen.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
