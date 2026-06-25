@@ -162,3 +162,111 @@ def test_run_screen_str_takes_lvgl_path(monkeypatch):
     assert captured["cfg"] == {"a": 1}
     assert captured["allow_screensaver"] is False
     assert captured["renderer"] is view.renderer
+
+
+# ---------------------------------------------------------------------------
+# ButtonOption.to_lvgl — bare label vs native object form
+# (parity with the screens-side read_button_list_items() contract)
+# ---------------------------------------------------------------------------
+
+from seedsigner.views.view import (
+    ButtonOption, ButtonOptionWithoutTranslation, button_list_lvgl_cfg, _lvgl_color,
+)
+# Same gettext the View layer uses; compute expected labels through it so these
+# assertions don't depend on whatever locale a prior test left active globally.
+from seedsigner.compat.l10n import gettext as _
+
+
+def test_button_option_to_lvgl_plain_is_bare_label():
+    # No per-button styling -> bare (translated) label string; unchanged contract,
+    # so plain menus serialize byte-identically.
+    out = ButtonOption("Scan").to_lvgl()
+    assert out == _("Scan")
+    assert isinstance(out, str)
+
+
+def test_button_option_to_lvgl_object_form_right_icon_and_label_color():
+    opt = ButtonOption("Discard seed", right_icon_name="", button_label_color="red")
+    assert opt.to_lvgl() == {
+        "label": _("Discard seed"),
+        "right_icon": "",
+        "label_color": "#ff0000",
+    }
+
+
+def test_button_option_to_lvgl_leading_icon_and_icon_color():
+    opt = ButtonOption("Scan", icon_name="", icon_color="blue")
+    assert opt.to_lvgl() == {"label": _("Scan"), "icon": "", "icon_color": "#0000ff"}
+
+
+def test_button_option_without_translation_uses_object_form_unchanged():
+    opt = ButtonOptionWithoutTranslation("xpub123", icon_name="")
+    assert opt.to_lvgl() == {"label": "xpub123", "icon": ""}
+
+
+def test_lvgl_color_maps_names_and_passes_hex_through():
+    assert _lvgl_color("red") == "#ff0000"
+    assert _lvgl_color("blue") == "#0000ff"
+    assert _lvgl_color("#30D158") == "#30D158"  # GUIConstants hex passes through
+    assert _lvgl_color(None) is None
+
+
+# ---------------------------------------------------------------------------
+# button_list_lvgl_cfg — screen-level forwarding of the new native keys
+# ---------------------------------------------------------------------------
+
+def test_button_list_lvgl_cfg_forwards_top_nav_icon_and_layout():
+    # The SeedOptionsView migration shape: fingerprint top-nav icon + left-aligned
+    # bottom list.
+    cfg = button_list_lvgl_cfg(
+        title="1A2B3C4D",
+        button_data=["A", "B"],
+        top_nav_icon_name="",
+        top_nav_icon_color="#409CFF",
+        is_button_text_centered=False,
+        is_bottom_list=True,
+        selected_button=2,
+    )
+    assert cfg["top_nav"] == {
+        "title": "1A2B3C4D",
+        "show_back_button": True,
+        "icon": "",
+        "icon_color": "#409CFF",
+    }
+    assert cfg["is_button_text_centered"] is False
+    assert cfg["is_bottom_list"] is True
+    assert cfg["initial_selected_index"] == 2
+
+
+def test_button_list_lvgl_cfg_forwards_text_power_and_settings_keys():
+    cfg = button_list_lvgl_cfg(
+        title="Settings",
+        button_data=["A"],
+        text="Choose one",
+        show_power_button=True,
+        checked_buttons=[1],
+        button_style="checkbox",
+    )
+    assert cfg["text"] == _("Choose one")
+    assert cfg["top_nav"]["show_power_button"] is True
+    assert cfg["checked_buttons"] == [1]
+    assert cfg["button_style"] == "checkbox"
+
+
+def test_button_list_lvgl_cfg_swallows_pil_only_kwargs():
+    # Any ButtonListScreen call site can string-dispatch: PIL-only kwargs (fonts,
+    # selected color, pixel scroll, title font) are accepted and ignored, not a
+    # TypeError. is_button_text_centered defaults to None -> key omitted (native
+    # default centered).
+    cfg = button_list_lvgl_cfg(
+        title="X",
+        button_data=["A"],
+        button_font_name="some_font",
+        button_font_size=20,
+        button_selected_color="#FF9F0A",
+        title_font_size=18,
+        scroll_y_initial_offset=40,
+    )
+    assert cfg["top_nav"]["title"] == "X"
+    assert "button_font_name" not in cfg
+    assert "is_button_text_centered" not in cfg

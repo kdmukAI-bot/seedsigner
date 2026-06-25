@@ -18,6 +18,28 @@ RET_CODE__POWER_BUTTON = 1001
 
 
 
+# Pillow accepts CSS color *names* (e.g. "red", "blue") wherever the PIL screens
+# take a fill color; the native LVGL screens parse only 6-digit hex. Translate the
+# names the app actually uses for button/icon styling. Values already in "#rrggbb"
+# form pass through unchanged (every GUIConstants color is 6-digit hex).
+_LVGL_NAMED_COLORS = {
+    "red": "#ff0000",
+    "blue": "#0000ff",
+}
+
+
+def _lvgl_color(color: str):
+    """Map a PIL color name/hex to the 6-digit hex the native screens require.
+
+    None/empty -> None (caller omits the key, native applies its default).
+    """
+    if not color:
+        return None
+    if color.startswith("#"):
+        return color
+    return _LVGL_NAMED_COLORS.get(color.lower(), color)
+
+
 class ButtonOption:
     """
     Note: The babel config in setup.cfg will extract the `button_label` string for translation
@@ -64,14 +86,36 @@ class ButtonOption:
         )
 
 
+    def _lvgl_label(self):
+        # The (translated) label text. Mirrors the PIL ``Button`` path, which wraps
+        # the label in ``_()``. ``ButtonOptionWithoutTranslation`` overrides to skip it.
+        return _(self.button_label)
+
+
     def to_lvgl(self):
         """Serialize this option for a native LVGL screen's button list.
 
-        Text-only for now (the translated label); per-button icon support is
-        pending — see the seedsigner-lvgl-screens ``button_list_screen`` TODO.
-        Mirrors the PIL ``Button`` render path, which wraps the label in ``_()``.
+        Returns the bare label string when the option carries no per-button styling
+        — byte-identical to the original text-only contract, so plain menus are
+        unchanged. When an icon or color is set, returns the native object form
+        ``{"label", "icon"?, "right_icon"?, "icon_color"?, "label_color"?}`` parsed
+        by the screens-side ``read_button_list_items()``. Mirrors the PIL ``Button``
+        render path (``icon_name`` drawn inline; ``button_label_color`` as the label
+        fill, e.g. the red "Discard" options).
         """
-        return _(self.button_label)
+        label = self._lvgl_label()
+        if not (self.icon_name or self.right_icon_name or self.icon_color or self.button_label_color):
+            return label
+        obj = {"label": label}
+        if self.icon_name:
+            obj["icon"] = self.icon_name
+        if self.right_icon_name:
+            obj["right_icon"] = self.right_icon_name
+        if self.icon_color:
+            obj["icon_color"] = _lvgl_color(self.icon_color)
+        if self.button_label_color:
+            obj["label_color"] = _lvgl_color(self.button_label_color)
+        return obj
 
 
 
@@ -81,7 +125,7 @@ class ButtonOptionWithoutTranslation(ButtonOption):
     The labels are also not extracted for translation by babel.
     """
 
-    def to_lvgl(self):
+    def _lvgl_label(self):
         # No translation, matching the PIL render path for this subclass.
         return self.button_label
 
@@ -440,33 +484,62 @@ def button_list_lvgl_cfg(
     *,
     title: str,
     button_data: list,
+    text: str = None,                       # intro/body text above the list (native cfg["text"])
     show_back_button: bool = True,
+    show_power_button: bool = False,
+    top_nav_icon_name: str = None,          # contextual title icon glyph (e.g. fingerprint)
+    top_nav_icon_color: str = None,
     is_bottom_list: bool = False,
     selected_button: int = 0,
-    is_button_text_centered: bool = None,   # accepted for call-site parity; the native
-                                            # button_list_screen has no per-screen text
-                                            # centering control yet — currently a no-op.
+    is_button_text_centered: bool = None,   # None -> native default (centered); False -> left-align
+    checked_buttons: list = None,           # settings multi-select: indices rendered checked
+    button_style: str = None,               # "checkbox" | "radio" (settings list variant)
     scroll_y_initial_offset: int = None,    # PIL pixel-scroll; the native screen restores
                                             # position via selected_button -> initial_selected_index.
+    **_pil_only,                            # swallow PIL-only kwargs (fonts, button_selected_color,
+                                            # title_font_size, …) so any ButtonListScreen call site
+                                            # can string-dispatch without a TypeError.
 ) -> dict:
     """Assemble a native ``button_list_screen`` config from the kwargs a View passed
     to ``run_screen`` (the same arguments the PIL ``ButtonListScreen`` took).
 
     Called by ``View.run_screen``, NOT by Views — Views stay free of the native
-    config shape. This nests the ``TopNav`` fields the native schema requires
-    (``_(title)`` mirrors the PIL ``TopNav``'s ``_(self.title)``) and maps
-    ``selected_button -> initial_selected_index``. The ``button_data`` options are
-    left as-is here; ``run_lvgl_screen`` serializes them (``ButtonOption.to_lvgl()``)
-    just before the native call, screen-agnostically, so every screen's button list
-    gets the same treatment. PIL-only kwargs have no native equivalent yet (ignored).
+    config shape. Nests the ``TopNav`` fields the native schema requires
+    (``_(title)`` mirrors the PIL ``TopNav``'s ``_(self.title)``; an optional
+    contextual title icon + power button), forwards the screen-level options the
+    native ``button_list_screen`` now supports (intro ``text``, left-aligned labels,
+    settings checkbox/radio + checked rows), and maps ``selected_button ->
+    initial_selected_index``. The ``button_data`` options are left as-is here;
+    ``run_lvgl_screen`` serializes them (``ButtonOption.to_lvgl()``) just before the
+    native call, screen-agnostically, so every screen's button list gets the same
+    treatment. Keys must match the screens-side JSON contract (see
+    seedsigner-lvgl-screens ``docs/button_list_screen_parity.md``). PIL-only kwargs
+    have no native equivalent (scoped out) and are ignored.
     """
+    top_nav = {"title": _(title), "show_back_button": show_back_button}
+    if show_power_button:
+        top_nav["show_power_button"] = True
+    if top_nav_icon_name:
+        top_nav["icon"] = top_nav_icon_name
+        icon_color = _lvgl_color(top_nav_icon_color)
+        if icon_color:
+            top_nav["icon_color"] = icon_color
+
     cfg = {
-        "top_nav": {"title": _(title), "show_back_button": show_back_button},
+        "top_nav": top_nav,
         "button_list": list(button_data),   # raw ButtonOptions; serialized in run_lvgl_screen
         "is_bottom_list": is_bottom_list,
     }
+    if text:
+        cfg["text"] = _(text)
+    if is_button_text_centered is not None:
+        cfg["is_button_text_centered"] = is_button_text_centered
     if selected_button:
         cfg["initial_selected_index"] = selected_button
+    if checked_buttons:
+        cfg["checked_buttons"] = list(checked_buttons)
+    if button_style:
+        cfg["button_style"] = button_style
     return cfg
 
 
