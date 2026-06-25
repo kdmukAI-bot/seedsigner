@@ -7,7 +7,7 @@ from seedsigner.compat.l10n import gettext as _
 
 from embit.descriptor import Descriptor
 
-from seedsigner.gui.constants import FontAwesomeIconConstants, SeedSignerIconConstants
+from seedsigner.gui.constants import FontAwesomeIconConstants, GUIConstants, SeedSignerIconConstants
 from seedsigner.models.encode_qr import CompactSeedQrEncoder, GenericStaticQrEncoder, SeedQrEncoder, SpecterLegacyXPubQrEncoder, StaticXpubQrEncoder, UrXpubQrEncoder
 from seedsigner.models.qr_type import QRType
 from seedsigner.models.seed import Seed
@@ -607,10 +607,17 @@ class SeedOptionsView(View):
 
         button_data.append(self.DISCARD)
         
+        # Native button_list_screen (LVGL). The bespoke SeedOptionsScreen only
+        # set top-nav fingerprint icon + title and a bottom, left-aligned list;
+        # those are all forwarded keys now, so the View passes them directly.
         selected_menu_num = self.run_screen(
-            seed_screens.SeedOptionsScreen,
+            "button_list_screen",
+            title=self.seed.get_fingerprint(self.settings.get_value(SettingsConstants.SETTING__NETWORK)),
             button_data=button_data,
-            fingerprint=self.seed.get_fingerprint(self.settings.get_value(SettingsConstants.SETTING__NETWORK)),
+            top_nav_icon_name=SeedSignerIconConstants.FINGERPRINT,
+            top_nav_icon_color=GUIConstants.INFO_COLOR,
+            is_button_text_centered=False,
+            is_bottom_list=True,
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
