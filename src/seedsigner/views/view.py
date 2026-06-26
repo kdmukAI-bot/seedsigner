@@ -493,7 +493,7 @@ def button_list_lvgl_cfg(
     selected_button: int = 0,
     is_button_text_centered: bool = None,   # None -> native default (centered); False -> left-align
     checked_buttons: list = None,           # settings multi-select: indices rendered checked
-    button_style: str = None,               # "checkbox" | "radio" (settings list variant)
+    button_style: str = None,               # "checkbox" | "checked_selection" (settings list variant)
     scroll_y_initial_offset: int = None,    # PIL pixel-scroll; the native screen restores
                                             # position via selected_button -> initial_selected_index.
     **_pil_only,                            # swallow PIL-only kwargs (fonts, button_selected_color,
