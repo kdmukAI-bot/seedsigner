@@ -164,8 +164,6 @@ class SettingsEntryUpdateSelectionView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens import settings_screens
-
         initial_value = self.settings.get_value(self.settings_entry.attr_name)
         button_data = []
         checked_buttons = []
@@ -187,14 +185,31 @@ class SettingsEntryUpdateSelectionView(View):
         if self.selected_button is None:
             self.selected_button = 0
             
+        # Single-select settings render as a checked-selection list (one checkmark);
+        # multiselect settings render as checkboxes (toggle several). These strings are
+        # the native button_list_screen's accepted button_style values
+        # ("default" / "checkbox" / "checked_selection"); the View owns the
+        # single-vs-multi decision (derived from the SettingsEntry type).
+        if self.settings_entry.type == SettingsConstants.TYPE__MULTISELECT:
+            button_style = "checkbox"
+        else:
+            button_style = "checked_selection"
+
+        # The setting's display name (and optional help text) was rendered above the
+        # options list by the PIL screen; forward it as the native intro text block.
+        text = _(self.settings_entry.display_name)
+        if self.settings_entry.help_text:
+            text += "\n" + _(self.settings_entry.help_text)
+
         ret_value = self.run_screen(
-            settings_screens.SettingsEntryUpdateSelectionScreen,
-            display_name=self.settings_entry.display_name,
-            help_text=self.settings_entry.help_text,
+            "button_list_screen",
+            title=_("Settings"),
+            text=text,
             button_data=button_data,
             selected_button=self.selected_button,
             checked_buttons=checked_buttons,
-            settings_entry_type=self.settings_entry.type,
+            button_style=button_style,
+            is_bottom_list=True,
         )
 
         destination = None
@@ -328,12 +343,20 @@ class SettingsIngestSettingsQRView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.settings_screens import SettingsQRConfirmationScreen
+        text = ""
+        if self.config_name:
+            # User-supplied name from the scanned SettingsQR; don't translate.
+            text = f'"{self.config_name}"\n\n'
+        # status_message was already localized in __init__.
+        text += self.status_message
+
         self.run_screen(
-            SettingsQRConfirmationScreen,
+            "button_list_screen",
             title=_("Settings QR"),
-            config_name=self.config_name,
-            status_message=self.status_message,
+            text=text,
+            button_data=[ButtonOption("Home")],
+            show_back_button=False,
+            is_bottom_list=True,
         )
 
         # Only one exit point
