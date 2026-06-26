@@ -81,7 +81,6 @@ class SeedSelectSeedView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens import seed_screens
         from seedsigner.controller import Controller
         seeds = self.controller.storage.seeds
 
@@ -115,10 +114,11 @@ class SeedSelectSeedView(View):
             button_data.append(self.TYPE_ELECTRUM)
 
         selected_menu_num = self.run_screen(
-            seed_screens.SeedSelectSeedScreen,
+            "button_list_screen",
             title=title,
             text=text,
             is_button_text_centered=False,
+            is_bottom_list=True,
             button_data=button_data,
         )
 
@@ -560,7 +560,6 @@ class SeedOptionsView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens import seed_screens
         from seedsigner.controller import Controller
         from seedsigner.views.psbt_views import PSBTOverviewView
 
@@ -1260,11 +1259,13 @@ class SeedWordsBackupTestPromptView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens import seed_screens
-
         button_data = [self.VERIFY, self.SKIP]
         selected_menu_num = self.run_screen(
-            seed_screens.SeedWordsBackupTestPromptScreen,
+            "button_list_screen",
+            title=_("Verify Backup?"),
+            text=_("Optionally verify that your mnemonic backup is correct."),
+            show_back_button=False,
+            is_bottom_list=True,
             button_data=button_data,
         )
 
@@ -1655,13 +1656,13 @@ class SeedTranscribeSeedQRConfirmQRPromptView(View):
     
 
     def run(self):
-        from seedsigner.gui.screens import seed_screens
-
         button_data = [self.SCAN, self.DONE]
 
         selected_menu_option = self.run_screen(
-            seed_screens.SeedTranscribeSeedQRConfirmQRPromptScreen,
+            "button_list_screen",
             title=_("Confirm SeedQR?"),
+            text=_("Optionally scan your transcribed SeedQR to confirm that it reads back correctly."),
+            is_bottom_list=True,
             button_data=button_data,
         )
 
@@ -1845,12 +1846,11 @@ class AddressVerificationSigTypeView(View):
     MULTISIG = ButtonOption("Multisig")
 
     def run(self):
-        from seedsigner.gui.screens import seed_screens
         from seedsigner.helpers import embit_utils
         from seedsigner.controller import Controller
         button_data = [self.SINGLE_SIG, self.MULTISIG]
         selected_menu_num = self.run_screen(
-            seed_screens.AddressVerificationSigTypeScreen,
+            "button_list_screen",
             title=_("Verify Address"),
             text=_("Sig type can't be auto-detected from this address. Please specify:"),
             button_data=button_data,
@@ -2100,11 +2100,12 @@ class LoadMultisigWalletDescriptorView(View):
     CANCEL = ButtonOption("Cancel")
 
     def run(self):
-        from seedsigner.gui.screens import seed_screens
-
         button_data = [self.SCAN, self.CANCEL]
         selected_menu_num = self.run_screen(
-            seed_screens.LoadMultisigWalletDescriptorScreen,
+            "button_list_screen",
+            title=_("Multisig Verification"),
+            text=_("Load your multisig wallet descriptor to verify your receive/self-transfer or change address."),
+            is_bottom_list=True,
             button_data=button_data,
             show_back_button=False,
         )
