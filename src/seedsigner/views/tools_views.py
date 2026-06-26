@@ -297,7 +297,6 @@ class ToolsCalcFinalWordFinalizePromptView(View):
     ZEROS = ButtonOption("Finalize with zeros")
 
     def run(self):
-        from seedsigner.gui.screens.tools_screens import ToolsCalcFinalWordFinalizePromptScreen
         mnemonic = self.controller.storage.pending_mnemonic
         mnemonic_length = len(mnemonic)
         if mnemonic_length == 12:
@@ -307,9 +306,13 @@ class ToolsCalcFinalWordFinalizePromptView(View):
 
         button_data = [self.COIN_FLIPS, self.SELECT_WORD, self.ZEROS]
         selected_menu_num = self.run_screen(
-            ToolsCalcFinalWordFinalizePromptScreen,
-            mnemonic_length=mnemonic_length,
-            num_entropy_bits=num_entropy_bits,
+            "button_list_screen",
+            # TRANSLATOR_NOTE: Build the last word in a 12 or 24 word BIP-39 mnemonic seed phrase.
+            title=_("Build Final Word"),
+            # TRANSLATOR_NOTE: Final word calc. `mnemonic_length` = 12 or 24. `num_bits` = 7 or 3 (bits of entropy in final word).
+            text=_("The {mnemonic_length}th word is built from {num_bits} more entropy bits plus auto-calculated checksum.").format(mnemonic_length=mnemonic_length, num_bits=num_entropy_bits),
+            is_bottom_list=True,
+            is_button_text_centered=True,
             button_data=button_data,
         )
 
