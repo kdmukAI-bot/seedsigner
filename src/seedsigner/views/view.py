@@ -274,6 +274,13 @@ class View:
         # but no title, so it correctly stays cfg-less.
         if lvgl_cfg is None and "title" in kwargs and "button_data" in kwargs:
             lvgl_cfg = button_list_lvgl_cfg(**kwargs)
+        elif lvgl_cfg is not None and "button_data" in kwargs and "button_list" not in lvgl_cfg:
+            # A View that builds its own cfg (e.g. the status screens) still passes
+            # button_data as a kwarg — both so the flow-test harness can resolve a
+            # selection and so the View keeps one list to index the result against.
+            # Fold it into the cfg's button_list here; run_lvgl_screen copies the cfg
+            # and serializes the ButtonOptions, so the View's list is untouched.
+            lvgl_cfg = {**lvgl_cfg, "button_list": kwargs["button_data"]}
 
         # Imported lazily so Views never pull the native module in, and so this stays
         # out of the module-level import graph that must load on MicroPython.
@@ -582,14 +589,14 @@ class ErrorView(View):
     def __init__(self,
                  title: str = _mft("Error"),
                  show_back_button: bool = True,
-                 status_icon_name: str = SeedSignerIconConstants.ERROR,
+                 status_type: str = "error",
                  status_headline: str = None,
                  text: str = None,
                  button_text: str = None,
                  next_destination: Destination = None):
         self.title = title
         self.show_back_button = show_back_button
-        self.status_icon_name = status_icon_name
+        self.status_type = status_type
         self.status_headline = status_headline
         self.text = text
         self.button_text = button_text
@@ -597,16 +604,19 @@ class ErrorView(View):
         self.__post_init__()
 
     def run(self):
-        from seedsigner.gui.screens.screen import ErrorScreen
+        lvgl_cfg = {
+            "status_type": self.status_type,
+            "top_nav": {"title": _(self.title), "show_back_button": self.show_back_button},
+        }
+        if self.status_headline:
+            lvgl_cfg["status_headline"] = _(self.status_headline)
+        if self.text:
+            lvgl_cfg["text"] = _(self.text)
 
         self.run_screen(
-            ErrorScreen,
-            title=self.title,
-            status_icon_name=self.status_icon_name,
-            status_headline=self.status_headline,
-            text=self.text,
+            "large_icon_status_screen",
             button_data=[ButtonOption(self.button_text)],
-            show_back_button=self.show_back_button,
+            lvgl_cfg=lvgl_cfg,
         )
         return self.next_destination if self.next_destination else Destination(MainMenuView, clear_history=True)
 
@@ -624,7 +634,9 @@ class NetworkMismatchErrorView(ErrorView):
 
         # TRANSLATOR_NOTE: The network setting (mainnet/testnet/regtest) doesn't match the provided derivation path
         self.title = _("Network Mismatch")
-        self.status_icon_name = SeedSignerIconConstants.WARNING
+        # A network/derivation mismatch is a recoverable configuration block, not a
+        # device fault — dire_warning (orange "!"), not error (red "X").
+        self.status_type = "dire_warning"
         self.show_back_button = False
 
         # TRANSLATOR_NOTE: Button option to alter a setting
@@ -662,31 +674,32 @@ class UnhandledExceptionView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import ErrorScreen
-
         self.run_screen(
-            ErrorScreen,
-            title=_("System Error"),
-            status_headline=self.error[0],
-            text=self.error[1] + "\n" + self.error[2],
+            "large_icon_status_screen",
             button_data=[ButtonOption("Back to Main Menu")],
+            lvgl_cfg={
+                "status_type": "error",
+                "top_nav": {"title": _("System Error")},
+                "status_headline": _(self.error[0]),
+                "text": _(self.error[1] + "\n" + self.error[2]),
+            },
         )
-        
+
         return Destination(MainMenuView, clear_history=True)
 
 
 
 class CameraConnectionErrorView(View):
     def run(self):
-        from seedsigner.gui.screens.screen import ErrorScreen
-
         self.run_screen(
-            ErrorScreen,
-            title=_("Hardware Error"),
-            status_headline=_("Cannot access camera"),
-            text=_("Disconnect power and check for a loose camera connection."),
+            "large_icon_status_screen",
             button_data=[ButtonOption("Back to Main Menu")],
-            show_back_button=False,
+            lvgl_cfg={
+                "status_type": "error",
+                "top_nav": {"title": _("Hardware Error"), "show_back_button": False},
+                "status_headline": _("Cannot access camera"),
+                "text": _("Disconnect power and check for a loose camera connection."),
+            },
         )
 
         return Destination(MainMenuView, clear_history=True)
@@ -711,16 +724,15 @@ class OptionDisabledView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import WarningScreen
-
         button_data = [self.UPDATE_SETTING, self.DONE]
         selected_menu_num = self.run_screen(
-            WarningScreen,
-            title=_("Option Disabled"),
-            status_headline=None,
-            text=self.error_msg,
+            "large_icon_status_screen",
             button_data=button_data,
-            show_back_button=False,
+            lvgl_cfg={
+                "status_type": "warning",
+                "top_nav": {"title": _("Option Disabled"), "show_back_button": False},
+                "text": _(self.error_msg),
+            },
         )
 
         if button_data[selected_menu_num] == self.UPDATE_SETTING:

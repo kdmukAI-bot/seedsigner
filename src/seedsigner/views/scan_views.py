@@ -218,18 +218,15 @@ class ScanAddressView(ScanView):
 
 class ScanInvalidQRTypeView(View):
     def run(self):
-        from seedsigner.gui.screens import WarningScreen
-
-        # TODO: This screen says "Error" but is intentionally using the WarningScreen in
-        # order to avoid the perception that something is broken on our end. This should
-        # either change to use the red ErrorScreen or the "Error" title should be
-        # changed to something softer.
         self.run_screen(
-            WarningScreen,
-            title=_("Error"),
-            status_headline=_("Unknown QR Type"),
-            text=_("QRCode is invalid or is a data format not yet supported."),
+            "large_icon_status_screen",
             button_data=[ButtonOption("Back to Main Menu")],
+            lvgl_cfg={
+                "status_type": "warning",
+                "top_nav": {"title": _("Scan")},
+                "status_headline": _("Unknown QR Type"),
+                "text": _("QRCode is invalid or is a data format not yet supported."),
+            },
         )
 
         return Destination(MainMenuView, clear_history=True)
