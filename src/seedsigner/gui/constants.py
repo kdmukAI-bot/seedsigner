@@ -149,6 +149,30 @@ class GUIConstants:
 
 
 
+class StatusType:
+    """Severity/intent of a status screen. The view picks one and the renderer maps it to
+    that type's icon and color: the red "X" for ERROR, the "!" for WARNING and DIRE_WARNING,
+    the green check for SUCCESS. String values must match what the native
+    ``large_icon_status_screen`` parser accepts. Listed in ascending severity.
+    """
+    SUCCESS = "success"            # Green check. Positive confirmation an operation completed.
+    WARNING = "warning"            # Yellow "!". Non-blocking heads-up; the user may proceed.
+                                   # Includes privacy risk, e.g. an xpub leak (viewable
+                                   # history, not key material).
+    DIRE_WARNING = "dire_warning"  # Orange "!". A non-bug HARD STOP, or a security risk from
+                                   # key-material exposure (the seed / SeedQR itself).
+    ERROR = "error"                # Red "X". A device/system fault; a bug worth reporting.
+                                   # Narrow: only UnhandledException, CameraConnectionError,
+                                   # and the ErrorView base.
+
+
+class ButtonStyle:
+    """Render style of a button list. String values must match the native parser."""
+    DEFAULT = "default"
+    CHECKBOX = "checkbox"                    # settings multi-select checkboxes
+    CHECKED_SELECTION = "checked_selection"  # settings single-select (radio-style check)
+
+
 class FontAwesomeIconConstants:
     ANGLE_DOWN = "\uf107"
     ANGLE_UP = "\uf106"

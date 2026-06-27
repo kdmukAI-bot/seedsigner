@@ -3,7 +3,7 @@ from seedsigner.compat import IS_MICROPYTHON
 from seedsigner.compat.l10n import gettext as _
 
 from seedsigner.helpers.l10n import mark_for_translation as _mft
-from seedsigner.gui.constants import SeedSignerIconConstants
+from seedsigner.gui.constants import SeedSignerIconConstants, StatusType
 from seedsigner.models.settings import Settings, SettingsConstants
 from seedsigner.models.settings_definition import SettingsDefinition
 from seedsigner.models.threads import BaseThread
@@ -16,28 +16,6 @@ logger = logging.getLogger(__name__)
 RET_CODE__BACK_BUTTON = 1000
 RET_CODE__POWER_BUTTON = 1001
 
-
-
-# Pillow accepts CSS color *names* (e.g. "red", "blue") wherever the PIL screens
-# take a fill color; the native LVGL screens parse only 6-digit hex. Translate the
-# names the app actually uses for button/icon styling. Values already in "#rrggbb"
-# form pass through unchanged (every GUIConstants color is 6-digit hex).
-_LVGL_NAMED_COLORS = {
-    "red": "#ff0000",
-    "blue": "#0000ff",
-}
-
-
-def _lvgl_color(color: str):
-    """Map a PIL color name/hex to the 6-digit hex the native screens require.
-
-    None/empty -> None (caller omits the key, native applies its default).
-    """
-    if not color:
-        return None
-    if color.startswith("#"):
-        return color
-    return _LVGL_NAMED_COLORS.get(color.lower(), color)
 
 
 class ButtonOption:
@@ -86,36 +64,13 @@ class ButtonOption:
         )
 
 
-    def _lvgl_label(self):
-        # The (translated) label text. Mirrors the PIL ``Button`` path, which wraps
-        # the label in ``_()``. ``ButtonOptionWithoutTranslation`` overrides to skip it.
+    def resolved_label(self):
+        # The label text as the native button_list wants it, translated HERE (the one
+        # translation a ButtonOption owns) so call sites pass raw labels and the runner
+        # never translates. The runner's ``_serialize_button_option`` reads this plus the
+        # icon/color fields to shape the native item. ``ButtonOptionWithoutTranslation``
+        # overrides to skip translation.
         return _(self.button_label)
-
-
-    def to_lvgl(self):
-        """Serialize this option for a native LVGL screen's button list.
-
-        Returns the bare label string when the option carries no per-button styling
-        — byte-identical to the original text-only contract, so plain menus are
-        unchanged. When an icon or color is set, returns the native object form
-        ``{"label", "icon"?, "right_icon"?, "icon_color"?, "label_color"?}`` parsed
-        by the screens-side ``read_button_list_items()``. Mirrors the PIL ``Button``
-        render path (``icon_name`` drawn inline; ``button_label_color`` as the label
-        fill, e.g. the red "Discard" options).
-        """
-        label = self._lvgl_label()
-        if not (self.icon_name or self.right_icon_name or self.icon_color or self.button_label_color):
-            return label
-        obj = {"label": label}
-        if self.icon_name:
-            obj["icon"] = self.icon_name
-        if self.right_icon_name:
-            obj["right_icon"] = self.right_icon_name
-        if self.icon_color:
-            obj["icon_color"] = _lvgl_color(self.icon_color)
-        if self.button_label_color:
-            obj["label_color"] = _lvgl_color(self.button_label_color)
-        return obj
 
 
 
@@ -125,7 +80,7 @@ class ButtonOptionWithoutTranslation(ButtonOption):
     The labels are also not extracted for translation by babel.
     """
 
-    def _lvgl_label(self):
+    def resolved_label(self):
         # No translation, matching the PIL render path for this subclass.
         return self.button_label
 
@@ -233,59 +188,141 @@ class View:
         return self._redirect
 
 
-    def run_screen(self, screen, *, lvgl_cfg=None, allow_screensaver=True, **kwargs) -> int | str:
-        """
-            Dispatch to a Screen implementation, run its interactive display, and
-            return the user's input.
+    def run_screen(self, screen, **kwargs) -> int | str:
+        """Dispatch a screen and return the user's input.
 
-            * A PIL Screen *class* (a ``type``) is instantiated with ``**kwargs``
-              and displayed — the long-standing CPython path, unchanged for every
-              existing call site.
-            * An LVGL screen, identified by its native screen-function *name* (a
-              ``str``), is run through the LVGL screen runner. ``lvgl_cfg`` is the
-              JSON-style config dict handed to the native screen; ``allow_screensaver``
-              lets a screen opt out of the idle screensaver (e.g. camera scanning).
+        Thin, backend-agnostic boundary; it knows NOTHING about the LVGL cfg shape:
+          * A PIL Screen *class* (a ``type``) is instantiated with ``**kwargs`` and
+            displayed; the legacy CPython path, unchanged for every existing call site.
+          * A native screen *name* (a ``str``) hands the flat ``**kwargs`` attrs to the
+            runner, which owns all cfg assembly. ``button_data`` (when present) rides
+            ``**kwargs`` so the flow-test harness can read it.
 
-            ``isinstance(screen, type)`` is the discriminator (MicroPython-safe):
-            classes take the PIL branch, strings the LVGL branch.
+        ``isinstance(screen, type)`` is the MicroPython-safe discriminator. The typed
+        ``run_button_list_screen`` / ``run_status_screen`` helpers are the documented entry
+        points for those families; bare ``run_screen`` serves main_menu and one-offs.
         """
         if isinstance(screen, type):
             if IS_MICROPYTHON:
-                # A PIL Screen *class* can't render on MicroPython (no PIL). Show
-                # the recoverable not-implemented notice instead of instantiating
-                # it, so a not-yet-migrated screen can't kill the session. This is
-                # the defensive path; the dominant one is a View whose lazy PIL
-                # import fails before run_screen is reached — caught by the
-                # Controller and routed to NotYetImplementedView.
-                from seedsigner.gui.lvgl_screen_runner import run_lvgl_screen
-                return run_lvgl_screen(
-                    self.renderer,
-                    "large_icon_status_screen",
-                    cfg=not_implemented_lvgl_cfg(_mft("This is still on our to-do list!")),
+                # A PIL Screen *class* can't render on MicroPython (no PIL). Show the
+                # recoverable not-implemented notice instead of instantiating it, so a
+                # not-yet-migrated screen can't kill the session. (Dominant path: a View's
+                # lazy PIL import fails first and the Controller routes to
+                # NotYetImplementedView.)
+                return self.run_status_screen(
+                    status_type=StatusType.WARNING,
+                    title=_("Work In Progress"),
+                    status_headline=_("Not Yet Implemented"),
+                    text=_("This is still on our to-do list!"),
+                    show_back_button=False,
+                    warning_edges=False,
                     allow_screensaver=False,
                 )
             self.screen = screen(**kwargs)
             return self.screen.display()
 
-        # LVGL screen (by name). A plain ButtonOption menu (button_list_screen) is
-        # dispatched with the same kwargs the PIL ButtonListScreen took; assemble its
-        # native cfg here so Views never build it. The title+button_data signature is
-        # the discriminator: main_menu_screen passes button_data (for the flow harness)
-        # but no title, so it correctly stays cfg-less.
-        if lvgl_cfg is None and "title" in kwargs and "button_data" in kwargs:
-            lvgl_cfg = button_list_lvgl_cfg(**kwargs)
-        elif lvgl_cfg is not None and "button_data" in kwargs and "button_list" not in lvgl_cfg:
-            # A View that builds its own cfg (e.g. the status screens) still passes
-            # button_data as a kwarg — both so the flow-test harness can resolve a
-            # selection and so the View keeps one list to index the result against.
-            # Fold it into the cfg's button_list here; run_lvgl_screen copies the cfg
-            # and serializes the ButtonOptions, so the View's list is untouched.
-            lvgl_cfg = {**lvgl_cfg, "button_list": kwargs["button_data"]}
-
-        # Imported lazily so Views never pull the native module in, and so this stays
-        # out of the module-level import graph that must load on MicroPython.
+        # Native screen by name: hand the flat attrs to the runner, which owns all LVGL
+        # cfg shaping. Imported lazily so Views never pull the native module into the
+        # module-level import graph that must load on MicroPython.
         from seedsigner.gui.lvgl_screen_runner import run_lvgl_screen
-        return run_lvgl_screen(self.renderer, screen, cfg=lvgl_cfg, allow_screensaver=allow_screensaver)
+        return run_lvgl_screen(self.renderer, screen, attrs=kwargs)
+
+
+    def run_button_list_screen(
+        self,
+        # The bare ``*`` makes every following arg keyword-only (callers must write
+        # ``title=...``, never positional) so call sites stay self-documenting and
+        # order-independent. Args with no default (title, button_data) are therefore
+        # *required* keyword args.
+        *,
+        title,
+        button_data,
+        text=None,
+        show_back_button=True,
+        show_power_button=False,
+        top_nav_icon_name=None,
+        top_nav_icon_color=None,
+        is_bottom_list=False,
+        is_button_text_centered=None,
+        selected_button=0,
+        button_style=None,
+        checked_buttons=None,
+        allow_screensaver=True,
+    ) -> int | str:
+        """Run the native ``button_list_screen``; the typed entry point for menu/list
+        screens. Pass already-translated ``title``/``text``; ``button_data`` is a list of
+        ``ButtonOption`` (each serializes itself, and the flow harness reads the list)."""
+        return self.run_screen(
+            "button_list_screen",
+            title=title,
+            button_data=button_data,
+            text=text,
+            show_back_button=show_back_button,
+            show_power_button=show_power_button,
+            top_nav_icon_name=top_nav_icon_name,
+            top_nav_icon_color=top_nav_icon_color,
+            is_bottom_list=is_bottom_list,
+            is_button_text_centered=is_button_text_centered,
+            selected_button=selected_button,
+            button_style=button_style,
+            checked_buttons=checked_buttons,
+            allow_screensaver=allow_screensaver,
+        )
+
+
+    # Per-status_type default title + confirm-button label, filled when the caller omits
+    # them. Defined once here (not repeated at every call site, where they'd drift) and
+    # marked for extraction with _mft; run_status_screen translates them. Mirrors the
+    # native large_icon_status_screen defaults, but localized (the native English defaults
+    # never surface in production).
+    _STATUS_DEFAULT_TITLE = {
+        StatusType.SUCCESS: _mft("Success!"),
+        StatusType.WARNING: _mft("Caution"),
+        StatusType.DIRE_WARNING: _mft("Caution"),
+        StatusType.ERROR: _mft("Error"),
+    }
+    _STATUS_DEFAULT_BUTTON = {
+        StatusType.SUCCESS: _mft("OK"),
+        StatusType.WARNING: _mft("I understand"),
+        StatusType.DIRE_WARNING: _mft("I understand"),
+        StatusType.ERROR: _mft("I understand"),
+    }
+
+    def run_status_screen(
+        self,
+        *,
+        status_type,
+        title=None,
+        button_data=None,
+        show_back_button=True,
+        status_headline=None,
+        text=None,
+        warning_edges=None,
+        allow_screensaver=True,
+    ) -> int | str:
+        """Run the native ``large_icon_status_screen``; the typed entry point for the
+        status/warning/error family (see ``StatusType``).
+
+        The status_type owns the icon, so there is no icon param. ``title`` and
+        ``button_data`` default to the per-status_type value when omitted; those defaults
+        are translated HERE (still view-layer, before the screen contract). Caller-supplied
+        ``title`` / ``status_headline`` / ``text`` must already be ``_()``-wrapped; they
+        pass through untouched (NEVER re-translated)."""
+        if title is None:
+            title = _(self._STATUS_DEFAULT_TITLE[status_type])
+        if button_data is None:
+            button_data = [ButtonOption(self._STATUS_DEFAULT_BUTTON[status_type])]
+        return self.run_screen(
+            "large_icon_status_screen",
+            status_type=status_type,
+            title=title,
+            button_data=button_data,
+            show_back_button=show_back_button,
+            status_headline=status_headline,
+            text=text,
+            warning_edges=warning_edges,
+            allow_screensaver=allow_screensaver,
+        )
 
 
     def run(self, **kwargs) -> 'Destination':
@@ -370,11 +407,12 @@ class MainMenuView(View):
 
     def run(self):
         button_data = [self.SCAN, self.SEEDS, self.TOOLS, self.SETTINGS]
-        # LVGL screen, dispatched by name: the native main_menu_screen owns its own
-        # 2x2 grid labels/icons (and their localization), so no title/cfg is forwarded.
-        # button_data stays for the index -> Destination mapping below (and the flow
-        # harness), not for the native screen.
-        selected_menu_num = self.run_screen("main_menu_screen", button_data=button_data)
+        # Native main_menu_screen owns the fixed 2x2 grid + icons, but its DISPLAY TEXT
+        # (title + the four labels) is localized Python-side and passed through: the title
+        # here, the labels via button_data (the native screen reads their labels, ignores
+        # the icons). button_data also drives the index -> Destination mapping below + the
+        # flow harness.
+        selected_menu_num = self.run_screen("main_menu_screen", title=_("Home"), button_data=button_data)
 
         if selected_menu_num == RET_CODE__POWER_BUTTON:
             return Destination(PowerOptionsView)
@@ -462,94 +500,6 @@ class PowerOffView(View):
 
 
 
-def not_implemented_lvgl_cfg(text: str) -> dict:
-    """Config for the native ``large_icon_status_screen`` rendered as the
-    recoverable not-implemented notice on MicroPython.
-
-    Shared by ``NotYetImplementedView`` and ``View.run_screen``'s MicroPython
-    guard. Mirrors the PIL ``WarningScreen`` wording so the strings come from the
-    same translation catalog entries.
-    """
-    return {
-        "top_nav": {
-            "title": _("Work In Progress"),
-            "show_back_button": False,
-            "show_power_button": False,
-        },
-        "status_type": "warning",
-        # A not-yet-migrated screen is informational, not a hazard — keep the
-        # warning icon/headline but suppress the pulsing colored edge overlay
-        # (which "warning" enables by default).
-        "warning_edges": False,
-        "status_headline": _("Not Yet Implemented"),
-        "text": text,
-        "button_list": [_("Back to main menu")],
-    }
-
-
-def button_list_lvgl_cfg(
-    *,
-    title: str,
-    button_data: list,
-    text: str = None,                       # intro/body text above the list (native cfg["text"])
-    show_back_button: bool = True,
-    show_power_button: bool = False,
-    top_nav_icon_name: str = None,          # contextual title icon glyph (e.g. fingerprint)
-    top_nav_icon_color: str = None,
-    is_bottom_list: bool = False,
-    selected_button: int = 0,
-    is_button_text_centered: bool = None,   # None -> native default (centered); False -> left-align
-    checked_buttons: list = None,           # settings multi-select: indices rendered checked
-    button_style: str = None,               # "checkbox" | "checked_selection" (settings list variant)
-    scroll_y_initial_offset: int = None,    # PIL pixel-scroll; the native screen restores
-                                            # position via selected_button -> initial_selected_index.
-    **_pil_only,                            # swallow PIL-only kwargs (fonts, button_selected_color,
-                                            # title_font_size, …) so any ButtonListScreen call site
-                                            # can string-dispatch without a TypeError.
-) -> dict:
-    """Assemble a native ``button_list_screen`` config from the kwargs a View passed
-    to ``run_screen`` (the same arguments the PIL ``ButtonListScreen`` took).
-
-    Called by ``View.run_screen``, NOT by Views — Views stay free of the native
-    config shape. Nests the ``TopNav`` fields the native schema requires
-    (``_(title)`` mirrors the PIL ``TopNav``'s ``_(self.title)``; an optional
-    contextual title icon + power button), forwards the screen-level options the
-    native ``button_list_screen`` now supports (intro ``text``, left-aligned labels,
-    settings checkbox/radio + checked rows), and maps ``selected_button ->
-    initial_selected_index``. The ``button_data`` options are left as-is here;
-    ``run_lvgl_screen`` serializes them (``ButtonOption.to_lvgl()``) just before the
-    native call, screen-agnostically, so every screen's button list gets the same
-    treatment. Keys must match the screens-side JSON contract (see
-    seedsigner-lvgl-screens ``docs/button_list_screen_parity.md``). PIL-only kwargs
-    have no native equivalent (scoped out) and are ignored.
-    """
-    top_nav = {"title": _(title), "show_back_button": show_back_button}
-    if show_power_button:
-        top_nav["show_power_button"] = True
-    if top_nav_icon_name:
-        top_nav["icon"] = top_nav_icon_name
-        icon_color = _lvgl_color(top_nav_icon_color)
-        if icon_color:
-            top_nav["icon_color"] = icon_color
-
-    cfg = {
-        "top_nav": top_nav,
-        "button_list": list(button_data),   # raw ButtonOptions; serialized in run_lvgl_screen
-        "is_bottom_list": is_bottom_list,
-    }
-    if text:
-        cfg["text"] = _(text)
-    if is_button_text_centered is not None:
-        cfg["is_button_text_centered"] = is_button_text_centered
-    if selected_button:
-        cfg["initial_selected_index"] = selected_button
-    if checked_buttons:
-        cfg["checked_buttons"] = list(checked_buttons)
-    if button_style:
-        cfg["button_style"] = button_style
-    return cfg
-
-
 class NotYetImplementedView(View):
     """
         Temporary View to use during dev.
@@ -560,27 +510,17 @@ class NotYetImplementedView(View):
 
 
     def run(self):
-        if IS_MICROPYTHON:
-            # PIL screens (WarningScreen) can't render on MicroPython; show the
-            # native LVGL status screen by name instead.
-            self.run_screen(
-                "large_icon_status_screen",
-                lvgl_cfg=not_implemented_lvgl_cfg(self.text),
-                # A transient notice has no idle screensaver; it also keeps the
-                # native call to a single positional cfg arg (no wait_timeout_ms).
-                allow_screensaver=False,
-            )
-        else:
-            from seedsigner.gui.screens.screen import WarningScreen
-
-            self.run_screen(
-                WarningScreen,
-                title=_("Work In Progress"),
-                status_headline=_("Not Yet Implemented"),
-                text=self.text,
-                button_data=[ButtonOption("Back to main menu")],
-            )
-
+        # Native status screen on both platforms. A transient WIP notice opts out of the
+        # idle screensaver; warning_edges off keeps it informational, not a pulsing hazard.
+        self.run_status_screen(
+            status_type=StatusType.WARNING,
+            title=_("Work In Progress"),
+            status_headline=_("Not Yet Implemented"),
+            text=_(self.text),
+            show_back_button=False,
+            warning_edges=False,
+            allow_screensaver=False,
+        )
         return Destination(MainMenuView)
 
 
@@ -589,7 +529,7 @@ class ErrorView(View):
     def __init__(self,
                  title: str = _mft("Error"),
                  show_back_button: bool = True,
-                 status_type: str = "error",
+                 status_type: str = StatusType.ERROR,
                  status_headline: str = None,
                  text: str = None,
                  button_text: str = None,
@@ -604,19 +544,13 @@ class ErrorView(View):
         self.__post_init__()
 
     def run(self):
-        lvgl_cfg = {
-            "status_type": self.status_type,
-            "top_nav": {"title": _(self.title), "show_back_button": self.show_back_button},
-        }
-        if self.status_headline:
-            lvgl_cfg["status_headline"] = _(self.status_headline)
-        if self.text:
-            lvgl_cfg["text"] = _(self.text)
-
-        self.run_screen(
-            "large_icon_status_screen",
+        self.run_status_screen(
+            status_type=self.status_type,
+            title=_(self.title),
+            show_back_button=self.show_back_button,
+            status_headline=_(self.status_headline) if self.status_headline else None,
+            text=_(self.text) if self.text else None,
             button_data=[ButtonOption(self.button_text)],
-            lvgl_cfg=lvgl_cfg,
         )
         return self.next_destination if self.next_destination else Destination(MainMenuView, clear_history=True)
 
@@ -636,7 +570,7 @@ class NetworkMismatchErrorView(ErrorView):
         self.title = _("Network Mismatch")
         # A network/derivation mismatch is a recoverable configuration block, not a
         # device fault — dire_warning (orange "!"), not error (red "X").
-        self.status_type = "dire_warning"
+        self.status_type = StatusType.DIRE_WARNING
         self.show_back_button = False
 
         # TRANSLATOR_NOTE: Button option to alter a setting
@@ -674,15 +608,14 @@ class UnhandledExceptionView(View):
 
 
     def run(self):
-        self.run_screen(
-            "large_icon_status_screen",
+        # The exception class + message are raw Python error text, not translatable UI
+        # copy; pass them through untranslated (only the "System Error" title is _()'d).
+        self.run_status_screen(
+            status_type=StatusType.ERROR,
+            title=_("System Error"),
+            status_headline=self.error[0],
+            text=self.error[1] + "\n" + self.error[2],
             button_data=[ButtonOption("Back to Main Menu")],
-            lvgl_cfg={
-                "status_type": "error",
-                "top_nav": {"title": _("System Error")},
-                "status_headline": _(self.error[0]),
-                "text": _(self.error[1] + "\n" + self.error[2]),
-            },
         )
 
         return Destination(MainMenuView, clear_history=True)
@@ -691,15 +624,13 @@ class UnhandledExceptionView(View):
 
 class CameraConnectionErrorView(View):
     def run(self):
-        self.run_screen(
-            "large_icon_status_screen",
+        self.run_status_screen(
+            status_type=StatusType.ERROR,
+            title=_("Hardware Error"),
+            show_back_button=False,
+            status_headline=_("Cannot access camera"),
+            text=_("Disconnect power and check for a loose camera connection."),
             button_data=[ButtonOption("Back to Main Menu")],
-            lvgl_cfg={
-                "status_type": "error",
-                "top_nav": {"title": _("Hardware Error"), "show_back_button": False},
-                "status_headline": _("Cannot access camera"),
-                "text": _("Disconnect power and check for a loose camera connection."),
-            },
         )
 
         return Destination(MainMenuView, clear_history=True)
@@ -725,14 +656,12 @@ class OptionDisabledView(View):
 
     def run(self):
         button_data = [self.UPDATE_SETTING, self.DONE]
-        selected_menu_num = self.run_screen(
-            "large_icon_status_screen",
+        selected_menu_num = self.run_status_screen(
+            status_type=StatusType.WARNING,
+            title=_("Option Disabled"),
+            show_back_button=False,
+            text=_(self.error_msg),
             button_data=button_data,
-            lvgl_cfg={
-                "status_type": "warning",
-                "top_nav": {"title": _("Option Disabled"), "show_back_button": False},
-                "text": _(self.error_msg),
-            },
         )
 
         if button_data[selected_menu_num] == self.UPDATE_SETTING:
