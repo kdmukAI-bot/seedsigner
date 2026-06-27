@@ -280,17 +280,15 @@ class SeedMnemonicInvalidView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import DireWarningScreen
-
         button_data = [self.EDIT, self.DISCARD]
         selected_menu_num = self.run_screen(
-            DireWarningScreen,
-            title=_("Invalid Mnemonic!"),
-            status_icon_name=SeedSignerIconConstants.ERROR,
-            status_headline=None,
-            text=_("Checksum failure; not a valid seed phrase."),
-            show_back_button=False,
+            "large_icon_status_screen",
             button_data=button_data,
+            lvgl_cfg={
+                "status_type": "dire_warning",
+                "top_nav": {"title": _("Invalid Mnemonic!"), "show_back_button": False},
+                "text": _("Checksum failure; not a valid seed phrase."),
+            },
         )
 
         if button_data[selected_menu_num] == self.EDIT:
@@ -396,8 +394,6 @@ class SeedAddPassphraseExitDialogView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import WarningScreen
-
         if self.seed.passphrase:
             title = _("Discard passphrase?")
             message = _("Your current passphrase entry will be erased.")
@@ -408,12 +404,13 @@ class SeedAddPassphraseExitDialogView(View):
             button_data = [self.EDIT, self.SKIP]
         
         selected_menu_num = self.run_screen(
-            WarningScreen,
-            title=title,
-            status_headline=None,
-            text=message,
-            show_back_button=False,
+            "large_icon_status_screen",
             button_data=button_data,
+            lvgl_cfg={
+                "status_type": "warning",
+                "top_nav": {"title": title, "show_back_button": False},
+                "text": message,
+            },
         )
 
         if button_data[selected_menu_num] == self.EDIT:
@@ -484,20 +481,19 @@ class SeedDiscardView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import WarningScreen
-
         button_data = [self.KEEP, self.DISCARD]
 
         fingerprint = self.seed.get_fingerprint(self.settings.get_value(SettingsConstants.SETTING__NETWORK))
         # TRANSLATOR_NOTE: Inserts the seed fingerprint
         text = _("Wipe seed {} from the device?").format(fingerprint)
         selected_menu_num = self.run_screen(
-            WarningScreen,
-            title=_("Discard Seed?"),
-            status_headline=None,
-            text=text,
-            show_back_button=False,
+            "large_icon_status_screen",
             button_data=button_data,
+            lvgl_cfg={
+                "status_type": "warning",
+                "top_nav": {"title": _("Discard Seed?"), "show_back_button": False},
+                "text": text,
+            },
         )
 
         if button_data[selected_menu_num] == self.KEEP:
@@ -523,14 +519,13 @@ class SeedElectrumMnemonicStartView(View):
     Could be expanded with a follow-up View to specify Electrum seed type.
     """
     def run(self):
-        from seedsigner.gui.screens.screen import WarningScreen
-
         self.run_screen(
-                WarningScreen,
-                title=_("Electrum Warning"),
-                status_headline=None,
-                text=_("Some features are disabled for Electrum seeds."),
-                show_back_button=False,
+            "large_icon_status_screen",
+            lvgl_cfg={
+                "status_type": "warning",
+                "top_nav": {"title": _("Electrum Warning"), "show_back_button": False},
+                "text": _("Some features are disabled for Electrum seeds."),
+            },
         )
 
         self.controller.storage.init_pending_mnemonic(num_words=12, is_electrum=True)
@@ -876,8 +871,6 @@ class SeedExportXpubWarningView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import WarningScreen
-
         destination = Destination(
             SeedExportXpubDetailsView,
             view_args={
@@ -895,9 +888,12 @@ class SeedExportXpubWarningView(View):
             return destination
 
         selected_menu_num = self.run_screen(
-            WarningScreen,
-            status_headline=_("Privacy Leak!"),
-            text=_("Xpub can be used to view all future transactions."),
+            "large_icon_status_screen",
+            lvgl_cfg={
+                "status_type": "warning",
+                "status_headline": _("Privacy Leak!"),
+                "text": _("Xpub can be used to view all future transactions."),
+            },
         )
 
         if selected_menu_num == 0:
@@ -1040,8 +1036,6 @@ class SeedWordsWarningView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import DireWarningScreen
-
         destination = Destination(
             SeedWordsView,
             view_args=dict(
@@ -1056,8 +1050,13 @@ class SeedWordsWarningView(View):
             return destination
 
         selected_menu_num = self.run_screen(
-            DireWarningScreen,
-            text=_("You must keep your seed words private & away from all online devices."),
+            "large_icon_status_screen",
+            lvgl_cfg={
+                "status_type": "dire_warning",
+                # PIL DireWarningScreen's default headline; preserved verbatim.
+                "status_headline": _("Classified Info!"),
+                "text": _("You must keep your seed words private & away from all online devices."),
+            },
         )
 
         if selected_menu_num == 0:
@@ -1221,16 +1220,15 @@ class SeedBIP85InvalidChildIndexView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import DireWarningScreen
-
         self.run_screen(
-            DireWarningScreen,
-            title=_("BIP-85 Index Error"),
-            show_back_button=False,
-            status_icon_name=SeedSignerIconConstants.ERROR,
-            status_headline=_("Invalid Child Index"),
-            text=_("BIP-85 Child Index must be between 0 and 2^31-1."),
-            button_data=[ButtonOption("Try again")]
+            "large_icon_status_screen",
+            button_data=[ButtonOption("Try again")],
+            lvgl_cfg={
+                "status_type": "dire_warning",
+                "top_nav": {"title": _("BIP-85 Index"), "show_back_button": False},
+                "status_headline": _("Invalid Child Index"),
+                "text": _("BIP-85 Child Index must be between 0 and 2^31-1."),
+            },
         )
 
         return Destination(
@@ -1383,8 +1381,6 @@ class SeedWordsBackupTestMistakeView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import DireWarningScreen
-
         button_data = [self.REVIEW, self.RETRY]
 
         # TRANSLATOR_NOTE: Inserts the word number and the word (e.g. "Word #1 is not "apple"!")
@@ -1394,13 +1390,14 @@ class SeedWordsBackupTestMistakeView(View):
         status_headline = _("Wrong Word!")
 
         selected_menu_num = self.run_screen(
-            DireWarningScreen,
-            title=_("Verification Error"),
-            show_back_button=False,
-            status_icon_name=SeedSignerIconConstants.ERROR,
-            status_headline=status_headline,
+            "large_icon_status_screen",
             button_data=button_data,
-            text=text,
+            lvgl_cfg={
+                "status_type": "dire_warning",
+                "top_nav": {"title": _("Verify Backup"), "show_back_button": False},
+                "status_headline": status_headline,
+                "text": text,
+            },
         )
 
         if button_data[selected_menu_num] == self.REVIEW:
@@ -1428,14 +1425,15 @@ class SeedWordsBackupTestSuccessView(View):
         self.seed_num = seed_num
 
     def run(self):
-        from seedsigner.gui.screens.screen import LargeIconStatusScreen
         self.run_screen(
-            LargeIconStatusScreen,
-            title=_("Backup Verified"),
-            show_back_button=False,
-            status_headline=_("Success!"),
-            text=_("All mnemonic backup words were successfully verified!"),
-            button_data=[ButtonOption("OK")]
+            "large_icon_status_screen",
+            button_data=[ButtonOption("OK")],
+            lvgl_cfg={
+                "status_type": "success",
+                "top_nav": {"title": _("Backup Verified"), "show_back_button": False},
+                "status_headline": _("Success!"),
+                "text": _("All mnemonic backup words were successfully verified!"),
+            },
         )
 
         if self.seed_num is not None:
@@ -1520,8 +1518,6 @@ class SeedTranscribeSeedQRWarningView(View):
     
 
     def run(self):
-        from seedsigner.gui.screens.screen import DireWarningScreen
-
         destination = Destination(
             SeedTranscribeSeedQRWholeQRView,
             view_args={
@@ -1537,9 +1533,12 @@ class SeedTranscribeSeedQRWarningView(View):
             return destination
 
         selected_menu_num = self.run_screen(
-            DireWarningScreen,
-            status_headline=_("SeedQR is your private key!"),
-            text=_("Never photograph or scan it into a device that connects to the internet."),
+            "large_icon_status_screen",
+            lvgl_cfg={
+                "status_type": "dire_warning",
+                "status_headline": _("SeedQR is your private key!"),
+                "text": _("Never photograph or scan it into a device that connects to the internet."),
+            },
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
@@ -1717,15 +1716,15 @@ class SeedTranscribeSeedQRConfirmWrongSeedView(View):
     A valid SeedQR was scanned but it did NOT match the one we just transcribed!
     """
     def run(self):
-        from seedsigner.gui.screens.screen import DireWarningScreen
-
         self.run_screen(
-            DireWarningScreen,
-            title=_("Confirm SeedQR"),
-            status_headline=_("Error!"),
-            text=_("Your transcribed SeedQR does not match your original seed!"),
-            show_back_button=False,
+            "large_icon_status_screen",
             button_data=[ButtonOption("Review SeedQR")],
+            lvgl_cfg={
+                "status_type": "dire_warning",
+                "top_nav": {"title": _("Confirm SeedQR"), "show_back_button": False},
+                "status_headline": _("Doesn't Match!"),
+                "text": _("Your transcribed SeedQR does not match your original seed!"),
+            },
         )
 
         # Skip BACK to the zoomed in transcription view
@@ -1740,15 +1739,15 @@ class SeedTranscribeSeedQRConfirmInvalidQRView(View):
     """
     def run(self):
         # TODO: A better error message would be something like: "The QR code you scanned does not contain a valid SeedQR."
-        from seedsigner.gui.screens.screen import DireWarningScreen
-
         self.run_screen(
-            DireWarningScreen,
-            title=_("Confirm SeedQR"),
-            status_headline=_("Error!"),
-            text=_("Your transcribed SeedQR could not be read!"),
-            show_back_button=False,
+            "large_icon_status_screen",
             button_data=[ButtonOption("Review SeedQR")],
+            lvgl_cfg={
+                "status_type": "dire_warning",
+                "top_nav": {"title": _("Confirm SeedQR"), "show_back_button": False},
+                "status_headline": _("Unreadable!"),
+                "text": _("Your transcribed SeedQR could not be read!"),
+            },
         )
 
         # Skip BACK to the zoomed in transcription view
@@ -1766,14 +1765,15 @@ class SeedTranscribeSeedQRConfirmSuccessView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import LargeIconStatusScreen
         self.run_screen(
-            LargeIconStatusScreen,
-            title=_("Confirm SeedQR"),
-            status_headline=_("Success!"),
-            text=_("Your transcribed SeedQR successfully scanned and yielded the same seed."),
-            show_back_button=False,
+            "large_icon_status_screen",
             button_data=[ButtonOption("OK")],
+            lvgl_cfg={
+                "status_type": "success",
+                "top_nav": {"title": _("Confirm SeedQR"), "show_back_button": False},
+                "status_headline": _("Success!"),
+                "text": _("Your transcribed SeedQR successfully scanned and yielded the same seed."),
+            },
         )
 
         return Destination(SeedOptionsView, view_args={"seed_num": self.seed_num})

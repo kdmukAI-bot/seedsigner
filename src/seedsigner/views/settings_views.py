@@ -294,8 +294,6 @@ class SettingsSelectionRequiredWarningView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import WarningScreen
-
         # TRANSLATOR_NOTE: Title of a warning dialog when configuring a setting that requires at least one option to be selected.
         title = _("Selection Required")
 
@@ -306,12 +304,13 @@ class SettingsSelectionRequiredWarningView(View):
         button_text = _("Return to setting")
 
         self.run_screen(
-            WarningScreen,
-            title=title,
-            status_headline=None,
-            text=text,
+            "large_icon_status_screen",
             button_data=[ButtonOption(button_text)],
-            show_back_button=False,
+            lvgl_cfg={
+                "status_type": "warning",
+                "top_nav": {"title": title, "show_back_button": False},
+                "text": text,
+            },
         )
 
         return Destination(SettingsEntryUpdateSelectionView, view_args=dict(attr_name=self.settings_entry.attr_name))
