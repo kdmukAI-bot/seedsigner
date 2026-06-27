@@ -2,7 +2,7 @@ from seedsigner.compat.l10n import gettext as _
 
 from seedsigner.models.psbt_parser import PSBTParser
 from seedsigner.models.settings import SettingsConstants
-from seedsigner.gui.constants import FontAwesomeIconConstants, SeedSignerIconConstants
+from seedsigner.gui.constants import FontAwesomeIconConstants, SeedSignerIconConstants, StatusType
 from seedsigner.views.view import (BackStackView, ButtonOption, Destination, MainMenuView,
     NotYetImplementedView, RET_CODE__BACK_BUTTON, View)
 
@@ -45,8 +45,7 @@ class PSBTSelectSeedView(View):
         if self.settings.get_value(SettingsConstants.SETTING__ELECTRUM_SEEDS) == SettingsConstants.OPTION__ENABLED:
             button_data.append(self.TYPE_ELECTRUM)
 
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=_("Select Signer"),
             is_button_text_centered=False,
             button_data=button_data
@@ -165,14 +164,11 @@ class PSBTOverviewView(View):
 
 class PSBTUnsupportedScriptTypeWarningView(View):
     def run(self):
-        selected_menu_num = self.run_screen(
-            "large_icon_status_screen",
+        selected_menu_num = self.run_status_screen(
+            status_type=StatusType.WARNING,
+            status_headline=_("Unsupported Script Type!"),
+            text=_("Transaction has unsupported input script type, please verify your change addresses."),
             button_data=[ButtonOption("Continue")],
-            lvgl_cfg={
-                "status_type": "warning",
-                "status_headline": _("Unsupported Script Type!"),
-                "text": _("Transaction has unsupported input script type, please verify your change addresses."),
-            },
         )
         
         if selected_menu_num == RET_CODE__BACK_BUTTON:
@@ -189,15 +185,12 @@ class PSBTUnsupportedScriptTypeWarningView(View):
 
 class PSBTNoChangeWarningView(View):
     def run(self):
-        selected_menu_num = self.run_screen(
-            "large_icon_status_screen",
+        selected_menu_num = self.run_status_screen(
+            status_type=StatusType.WARNING,
+            # TRANSLATOR_NOTE: User will receive no change back; the inputs to this transaction are fully spent
+            status_headline=_("Full Spend!"),
+            text=_("This transaction spends its entire input value. No change is coming back to your wallet."),
             button_data=[ButtonOption("Continue")],
-            lvgl_cfg={
-                "status_type": "warning",
-                # TRANSLATOR_NOTE: User will receive no change back; the inputs to this transaction are fully spent
-                "status_headline": _("Full Spend!"),
-                "text": _("This transaction spends its entire input value. No change is coming back to your wallet."),
-            },
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
@@ -473,15 +466,13 @@ class PSBTAddressVerificationFailedView(View):
             # TRANSLATOR_NOTE: Variable is either "change" or "self-transfer".
             text = _("Transaction's {} address could not be generated from your seed.").format(_("change") if self.is_change else _("self-transfer"))
         
-        self.run_screen(
-            "large_icon_status_screen",
+        self.run_status_screen(
+            status_type=StatusType.DIRE_WARNING,
+            title=_("Suspicious Transaction"),
+            show_back_button=False,
+            status_headline=_("Address Verification Failed"),
+            text=text,
             button_data=[ButtonOption("Discard transaction")],
-            lvgl_cfg={
-                "status_type": "dire_warning",
-                "top_nav": {"title": _("Suspicious Transaction"), "show_back_button": False},
-                "status_headline": _("Address Verification Failed"),
-                "text": text,
-            },
         )
 
         # We're done with this PSBT. Route back to MainMenuView which always
@@ -589,15 +580,12 @@ class PSBTSigningErrorView(View):
             return Destination(MainMenuView)
 
         # Just a warning here; only use dire_warning for true security risks.
-        selected_menu_num = self.run_screen(
-            "large_icon_status_screen",
+        selected_menu_num = self.run_status_screen(
+            status_type=StatusType.WARNING,
+            title=_("Transaction Error"),
+            status_headline=_("Signing Failed"),
+            text=_("Signing with this seed did not add a valid signature."),
             button_data=[self.SELECT_DIFF_SEED],
-            lvgl_cfg={
-                "status_type": "warning",
-                "top_nav": {"title": _("Transaction Error")},
-                "status_headline": _("Signing Failed"),
-                "text": _("Signing with this seed did not add a valid signature."),
-            },
         )
 
         if selected_menu_num == 0:

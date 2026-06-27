@@ -1,7 +1,7 @@
 import logging
 from seedsigner.compat.l10n import gettext as _
 
-from seedsigner.gui.constants import GUIConstants, SeedSignerIconConstants
+from seedsigner.gui.constants import GUIConstants, SeedSignerIconConstants, StatusType, ButtonStyle
 from seedsigner.models.settings import Settings, SettingsConstants, SettingsDefinition
 
 from .view import ButtonOption, Destination, MainMenuView, RET_CODE__BACK_BUTTON, View
@@ -56,20 +56,18 @@ class SettingsMenuView(View):
             next_destination = Destination(SettingsMenuView, view_args={"visibility": SettingsConstants.VISIBILITY__HARDWARE})
 
         elif self.visibility == SettingsConstants.VISIBILITY__HARDWARE:
-            title = "Hardware"
+            title = _("Hardware")
             next_destination = None
 
         elif self.visibility == SettingsConstants.VISIBILITY__DEVELOPER:
             title = _("Dev Options")
             next_destination = None
 
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=title,
             is_button_text_centered=False,
             button_data=button_data,
             selected_button=selected_button,
-            scroll_y_initial_offset=self.initial_scroll,
         )
 
         # The native button_list_screen restores position via selected_button
@@ -186,14 +184,12 @@ class SettingsEntryUpdateSelectionView(View):
             self.selected_button = 0
             
         # Single-select settings render as a checked-selection list (one checkmark);
-        # multiselect settings render as checkboxes (toggle several). These strings are
-        # the native button_list_screen's accepted button_style values
-        # ("default" / "checkbox" / "checked_selection"); the View owns the
+        # multiselect settings render as checkboxes (toggle several). The View owns the
         # single-vs-multi decision (derived from the SettingsEntry type).
         if self.settings_entry.type == SettingsConstants.TYPE__MULTISELECT:
-            button_style = "checkbox"
+            button_style = ButtonStyle.CHECKBOX
         else:
-            button_style = "checked_selection"
+            button_style = ButtonStyle.CHECKED_SELECTION
 
         # The setting's display name (and optional help text) was rendered above the
         # options list by the PIL screen; forward it as the native intro text block.
@@ -201,8 +197,7 @@ class SettingsEntryUpdateSelectionView(View):
         if self.settings_entry.help_text:
             text += "\n" + _(self.settings_entry.help_text)
 
-        ret_value = self.run_screen(
-            "button_list_screen",
+        ret_value = self.run_button_list_screen(
             title=_("Settings"),
             text=text,
             button_data=button_data,
@@ -303,14 +298,12 @@ class SettingsSelectionRequiredWarningView(View):
         # TRANSLATOR_NOTE: Text for the button that returns the user to the setting configuration screen.
         button_text = _("Return to setting")
 
-        self.run_screen(
-            "large_icon_status_screen",
+        self.run_status_screen(
+            status_type=StatusType.WARNING,
+            title=title,
+            show_back_button=False,
+            text=text,
             button_data=[ButtonOption(button_text)],
-            lvgl_cfg={
-                "status_type": "warning",
-                "top_nav": {"title": title, "show_back_button": False},
-                "text": text,
-            },
         )
 
         return Destination(SettingsEntryUpdateSelectionView, view_args=dict(attr_name=self.settings_entry.attr_name))
@@ -349,8 +342,7 @@ class SettingsIngestSettingsQRView(View):
         # status_message was already localized in __init__.
         text += self.status_message
 
-        self.run_screen(
-            "button_list_screen",
+        self.run_button_list_screen(
             title=_("Settings QR"),
             text=text,
             button_data=[ButtonOption("Home")],

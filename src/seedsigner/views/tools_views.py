@@ -27,8 +27,7 @@ class ToolsMenuView(View):
     def run(self):
         button_data = [self.IMAGE, self.DICE, self.KEYBOARD, self.ADDRESS_EXPLORER, self.VERIFY_ADDRESS]
 
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=_("Tools"),
             is_button_text_centered=False,
             button_data=button_data
@@ -124,8 +123,7 @@ class ToolsImageEntropyMnemonicLengthView(View):
     def run(self):
         button_data = [self.TWELVE_WORDS, self.TWENTYFOUR_WORDS]
 
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=_("Mnemonic Length"),
             button_data=button_data,
         )
@@ -213,8 +211,7 @@ class ToolsDiceEntropyMnemonicLengthView(View):
         TWENTY_FOUR = ButtonOption(twenty_four, return_data=mnemonic_generation.DICE__NUM_ROLLS__24WORD)
 
         button_data = [TWELVE, TWENTY_FOUR]
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=_("Mnemonic Length"),
             is_bottom_list=True,
             is_button_text_centered=True,
@@ -269,8 +266,7 @@ class ToolsCalcFinalWordNumWordsView(View):
     def run(self):
         button_data = [self.TWELVE, self.TWENTY_FOUR]
 
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=_("Mnemonic Length"),
             is_bottom_list=True,
             is_button_text_centered=True,
@@ -305,8 +301,7 @@ class ToolsCalcFinalWordFinalizePromptView(View):
             num_entropy_bits = 3
 
         button_data = [self.COIN_FLIPS, self.SELECT_WORD, self.ZEROS]
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             # TRANSLATOR_NOTE: Build the last word in a 12 or 24 word BIP-39 mnemonic seed phrase.
             title=_("Build Final Word"),
             # TRANSLATOR_NOTE: Final word calc. `mnemonic_length` = 12 or 24. `num_bits` = 7 or 3 (bits of entropy in final word).
@@ -492,8 +487,7 @@ class ToolsAddressExplorerSelectSourceView(View):
         if self.settings.get_value(SettingsConstants.SETTING__ELECTRUM_SEEDS) == SettingsConstants.OPTION__ENABLED:
             button_data.append(self.TYPE_ELECTRUM)
 
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=_("Address Explorer"),
             button_data=button_data,
             is_button_text_centered=False,
@@ -706,7 +700,6 @@ class ToolsAddressExplorerAddressListView(View):
             start_index=self.start_index,
             addresses=addresses,
             selected_button=self.selected_button_index,
-            scroll_y_initial_offset=self.initial_scroll,
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:

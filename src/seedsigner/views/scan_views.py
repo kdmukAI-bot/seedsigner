@@ -2,6 +2,7 @@ import logging
 import re
 
 from seedsigner.compat.l10n import gettext as _
+from seedsigner.gui.constants import StatusType
 from seedsigner.helpers.l10n import mark_for_translation as _mft
 from seedsigner.models.settings import SettingsConstants
 from seedsigner.views.view import BackStackView, ButtonOption, ErrorView, MainMenuView, NotYetImplementedView, View, Destination
@@ -218,15 +219,12 @@ class ScanAddressView(ScanView):
 
 class ScanInvalidQRTypeView(View):
     def run(self):
-        self.run_screen(
-            "large_icon_status_screen",
+        self.run_status_screen(
+            status_type=StatusType.WARNING,
+            title=_("Scan"),
+            status_headline=_("Unknown QR Type"),
+            text=_("QRCode is invalid or is a data format not yet supported."),
             button_data=[ButtonOption("Back to Main Menu")],
-            lvgl_cfg={
-                "status_type": "warning",
-                "top_nav": {"title": _("Scan")},
-                "status_headline": _("Unknown QR Type"),
-                "text": _("QRCode is invalid or is a data format not yet supported."),
-            },
         )
 
         return Destination(MainMenuView, clear_history=True)

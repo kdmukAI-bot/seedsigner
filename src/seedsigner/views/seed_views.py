@@ -7,7 +7,7 @@ from seedsigner.compat.l10n import gettext as _
 
 from embit.descriptor import Descriptor
 
-from seedsigner.gui.constants import FontAwesomeIconConstants, GUIConstants, SeedSignerIconConstants
+from seedsigner.gui.constants import FontAwesomeIconConstants, GUIConstants, SeedSignerIconConstants, StatusType
 from seedsigner.models.encode_qr import CompactSeedQrEncoder, GenericStaticQrEncoder, SeedQrEncoder, SpecterLegacyXPubQrEncoder, StaticXpubQrEncoder, UrXpubQrEncoder
 from seedsigner.models.qr_type import QRType
 from seedsigner.models.seed import Seed
@@ -43,8 +43,7 @@ class SeedsMenuView(View):
             button_data.append(ButtonOption(seed["fingerprint"], SeedSignerIconConstants.FINGERPRINT))
         button_data.append(self.LOAD)
 
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=_("In-Memory Seeds"),
             is_button_text_centered=False,
             button_data=button_data
@@ -113,8 +112,7 @@ class SeedSelectSeedView(View):
         if self.settings.get_value(SettingsConstants.SETTING__ELECTRUM_SEEDS) == SettingsConstants.OPTION__ENABLED:
             button_data.append(self.TYPE_ELECTRUM)
 
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=title,
             text=text,
             is_button_text_centered=False,
@@ -176,8 +174,7 @@ class LoadSeedView(View):
         
         button_data.append(self.CREATE)
 
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=_("Load a Seed"),
             is_button_text_centered=False,
             button_data=button_data
@@ -281,14 +278,12 @@ class SeedMnemonicInvalidView(View):
 
     def run(self):
         button_data = [self.EDIT, self.DISCARD]
-        selected_menu_num = self.run_screen(
-            "large_icon_status_screen",
+        selected_menu_num = self.run_status_screen(
+            status_type=StatusType.DIRE_WARNING,
+            title=_("Invalid Mnemonic!"),
+            show_back_button=False,
+            text=_("Checksum failure; not a valid seed phrase."),
             button_data=button_data,
-            lvgl_cfg={
-                "status_type": "dire_warning",
-                "top_nav": {"title": _("Invalid Mnemonic!"), "show_back_button": False},
-                "text": _("Checksum failure; not a valid seed phrase."),
-            },
         )
 
         if button_data[selected_menu_num] == self.EDIT:
@@ -403,14 +398,12 @@ class SeedAddPassphraseExitDialogView(View):
             message = _("You have not entered a passphrase yet.")
             button_data = [self.EDIT, self.SKIP]
         
-        selected_menu_num = self.run_screen(
-            "large_icon_status_screen",
+        selected_menu_num = self.run_status_screen(
+            status_type=StatusType.WARNING,
+            title=title,
+            show_back_button=False,
+            text=message,
             button_data=button_data,
-            lvgl_cfg={
-                "status_type": "warning",
-                "top_nav": {"title": title, "show_back_button": False},
-                "text": message,
-            },
         )
 
         if button_data[selected_menu_num] == self.EDIT:
@@ -486,14 +479,12 @@ class SeedDiscardView(View):
         fingerprint = self.seed.get_fingerprint(self.settings.get_value(SettingsConstants.SETTING__NETWORK))
         # TRANSLATOR_NOTE: Inserts the seed fingerprint
         text = _("Wipe seed {} from the device?").format(fingerprint)
-        selected_menu_num = self.run_screen(
-            "large_icon_status_screen",
+        selected_menu_num = self.run_status_screen(
+            status_type=StatusType.WARNING,
+            title=_("Discard Seed?"),
+            show_back_button=False,
+            text=text,
             button_data=button_data,
-            lvgl_cfg={
-                "status_type": "warning",
-                "top_nav": {"title": _("Discard Seed?"), "show_back_button": False},
-                "text": text,
-            },
         )
 
         if button_data[selected_menu_num] == self.KEEP:
@@ -519,13 +510,11 @@ class SeedElectrumMnemonicStartView(View):
     Could be expanded with a follow-up View to specify Electrum seed type.
     """
     def run(self):
-        self.run_screen(
-            "large_icon_status_screen",
-            lvgl_cfg={
-                "status_type": "warning",
-                "top_nav": {"title": _("Electrum Warning"), "show_back_button": False},
-                "text": _("Some features are disabled for Electrum seeds."),
-            },
+        self.run_status_screen(
+            status_type=StatusType.WARNING,
+            title=_("Electrum Warning"),
+            show_back_button=False,
+            text=_("Some features are disabled for Electrum seeds."),
         )
 
         self.controller.storage.init_pending_mnemonic(num_words=12, is_electrum=True)
@@ -602,8 +591,7 @@ class SeedOptionsView(View):
         # Native button_list_screen (LVGL). The bespoke SeedOptionsScreen only
         # set top-nav fingerprint icon + title and a bottom, left-aligned list;
         # those are all forwarded keys now, so the View passes them directly.
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=self.seed.get_fingerprint(self.settings.get_value(SettingsConstants.SETTING__NETWORK)),
             button_data=button_data,
             top_nav_icon_name=SeedSignerIconConstants.FINGERPRINT,
@@ -661,8 +649,7 @@ class SeedBackupView(View):
         if self.seed.seedqr_supported:
             button_data.append(self.EXPORT_SEEDQR)
 
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=_("Backup Seed"),
             button_data=button_data,
             is_bottom_list=True,
@@ -698,8 +685,7 @@ class SeedExportXpubSigTypeView(View):
 
         button_data = [self.SINGLE_SIG, self.MULTISIG]
 
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=_("Export Xpub"),
             button_data=button_data
         )
@@ -751,8 +737,7 @@ class SeedExportXpubScriptTypeView(View):
             if script_type in self.settings.get_value(SettingsConstants.SETTING__SCRIPT_TYPES):
                 button_data.append(ButtonOption(display_name, return_data=script_type))
 
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=title,
             is_button_text_centered=False,
             button_data=button_data,
@@ -843,8 +828,7 @@ class SeedExportXpubQRFormatView(View):
         for display_name, setting_option in zip(self.settings.get_multiselect_value_display_names(SettingsConstants.SETTING__XPUB_QR_FORMAT), self.settings.get_value(SettingsConstants.SETTING__XPUB_QR_FORMAT)):
             button_data.append(ButtonOption(display_name, return_data=setting_option))
 
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=_("Xpub QR Format"),
             is_button_text_centered=False,
             button_data=button_data,
@@ -887,13 +871,10 @@ class SeedExportXpubWarningView(View):
             # Skip the WarningView entirely
             return destination
 
-        selected_menu_num = self.run_screen(
-            "large_icon_status_screen",
-            lvgl_cfg={
-                "status_type": "warning",
-                "status_headline": _("Privacy Leak!"),
-                "text": _("Xpub can be used to view all future transactions."),
-            },
+        selected_menu_num = self.run_status_screen(
+            status_type=StatusType.WARNING,
+            status_headline=_("Privacy Leak!"),
+            text=_("Xpub can be used to view all future transactions."),
         )
 
         if selected_menu_num == 0:
@@ -1049,14 +1030,10 @@ class SeedWordsWarningView(View):
             # Forward straight to showing the words
             return destination
 
-        selected_menu_num = self.run_screen(
-            "large_icon_status_screen",
-            lvgl_cfg={
-                "status_type": "dire_warning",
-                # PIL DireWarningScreen's default headline; preserved verbatim.
-                "status_headline": _("Classified Info!"),
-                "text": _("You must keep your seed words private & away from all online devices."),
-            },
+        selected_menu_num = self.run_status_screen(
+            status_type=StatusType.DIRE_WARNING,
+            status_headline=_("Classified Info!"),
+            text=_("You must keep your seed words private & away from all online devices."),
         )
 
         if selected_menu_num == 0:
@@ -1154,8 +1131,7 @@ class SeedBIP85SelectNumWordsView(View):
     def run(self):
         button_data = [self.WORDS_12, self.WORDS_24]
 
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=_("BIP-85 Num Words"),
             button_data=button_data
         )
@@ -1220,15 +1196,13 @@ class SeedBIP85InvalidChildIndexView(View):
 
 
     def run(self):
-        self.run_screen(
-            "large_icon_status_screen",
+        self.run_status_screen(
+            status_type=StatusType.DIRE_WARNING,
+            title=_("BIP-85 Index"),
+            show_back_button=False,
+            status_headline=_("Invalid Child Index"),
+            text=_("BIP-85 Child Index must be between 0 and 2^31-1."),
             button_data=[ButtonOption("Try again")],
-            lvgl_cfg={
-                "status_type": "dire_warning",
-                "top_nav": {"title": _("BIP-85 Index"), "show_back_button": False},
-                "status_headline": _("Invalid Child Index"),
-                "text": _("BIP-85 Child Index must be between 0 and 2^31-1."),
-            },
         )
 
         return Destination(
@@ -1257,8 +1231,7 @@ class SeedWordsBackupTestPromptView(View):
 
     def run(self):
         button_data = [self.VERIFY, self.SKIP]
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=_("Verify Backup?"),
             text=_("Optionally verify that your mnemonic backup is correct."),
             show_back_button=False,
@@ -1328,8 +1301,7 @@ class SeedWordsBackupTestView(View):
 
         # TRANSLATOR_NOTE: Inserts the word number (e.g. "Verify Word #1")
         title = _("Verify Word #{}").format(self.cur_index + 1)
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=title,
             show_back_button=False,
             button_data=button_data,
@@ -1389,15 +1361,13 @@ class SeedWordsBackupTestMistakeView(View):
         # TRANSLATOR_NOTE: User selected the wrong word during the mnemonic backup test (e.g. incorrectly said the 5th word was "zoo")
         status_headline = _("Wrong Word!")
 
-        selected_menu_num = self.run_screen(
-            "large_icon_status_screen",
+        selected_menu_num = self.run_status_screen(
+            status_type=StatusType.DIRE_WARNING,
+            title=_("Verify Backup"),
+            show_back_button=False,
+            status_headline=status_headline,
+            text=text,
             button_data=button_data,
-            lvgl_cfg={
-                "status_type": "dire_warning",
-                "top_nav": {"title": _("Verify Backup"), "show_back_button": False},
-                "status_headline": status_headline,
-                "text": text,
-            },
         )
 
         if button_data[selected_menu_num] == self.REVIEW:
@@ -1425,15 +1395,13 @@ class SeedWordsBackupTestSuccessView(View):
         self.seed_num = seed_num
 
     def run(self):
-        self.run_screen(
-            "large_icon_status_screen",
+        self.run_status_screen(
+            status_type=StatusType.SUCCESS,
+            title=_("Backup Verified"),
+            show_back_button=False,
+            status_headline=_("Success!"),
+            text=_("All mnemonic backup words were successfully verified!"),
             button_data=[ButtonOption("OK")],
-            lvgl_cfg={
-                "status_type": "success",
-                "top_nav": {"title": _("Backup Verified"), "show_back_button": False},
-                "status_headline": _("Success!"),
-                "text": _("All mnemonic backup words were successfully verified!"),
-            },
         )
 
         if self.seed_num is not None:
@@ -1532,13 +1500,10 @@ class SeedTranscribeSeedQRWarningView(View):
             # Forward straight to transcribing the SeedQR
             return destination
 
-        selected_menu_num = self.run_screen(
-            "large_icon_status_screen",
-            lvgl_cfg={
-                "status_type": "dire_warning",
-                "status_headline": _("SeedQR is your private key!"),
-                "text": _("Never photograph or scan it into a device that connects to the internet."),
-            },
+        selected_menu_num = self.run_status_screen(
+            status_type=StatusType.DIRE_WARNING,
+            status_headline=_("SeedQR is your private key!"),
+            text=_("Never photograph or scan it into a device that connects to the internet."),
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
@@ -1654,8 +1619,7 @@ class SeedTranscribeSeedQRConfirmQRPromptView(View):
     def run(self):
         button_data = [self.SCAN, self.DONE]
 
-        selected_menu_option = self.run_screen(
-            "button_list_screen",
+        selected_menu_option = self.run_button_list_screen(
             title=_("Confirm SeedQR?"),
             text=_("Optionally scan your transcribed SeedQR to confirm that it reads back correctly."),
             is_bottom_list=True,
@@ -1716,15 +1680,13 @@ class SeedTranscribeSeedQRConfirmWrongSeedView(View):
     A valid SeedQR was scanned but it did NOT match the one we just transcribed!
     """
     def run(self):
-        self.run_screen(
-            "large_icon_status_screen",
+        self.run_status_screen(
+            status_type=StatusType.DIRE_WARNING,
+            title=_("Confirm SeedQR"),
+            show_back_button=False,
+            status_headline=_("Doesn't Match!"),
+            text=_("Your transcribed SeedQR does not match your original seed!"),
             button_data=[ButtonOption("Review SeedQR")],
-            lvgl_cfg={
-                "status_type": "dire_warning",
-                "top_nav": {"title": _("Confirm SeedQR"), "show_back_button": False},
-                "status_headline": _("Doesn't Match!"),
-                "text": _("Your transcribed SeedQR does not match your original seed!"),
-            },
         )
 
         # Skip BACK to the zoomed in transcription view
@@ -1739,15 +1701,13 @@ class SeedTranscribeSeedQRConfirmInvalidQRView(View):
     """
     def run(self):
         # TODO: A better error message would be something like: "The QR code you scanned does not contain a valid SeedQR."
-        self.run_screen(
-            "large_icon_status_screen",
+        self.run_status_screen(
+            status_type=StatusType.DIRE_WARNING,
+            title=_("Confirm SeedQR"),
+            show_back_button=False,
+            status_headline=_("Unreadable!"),
+            text=_("Your transcribed SeedQR could not be read!"),
             button_data=[ButtonOption("Review SeedQR")],
-            lvgl_cfg={
-                "status_type": "dire_warning",
-                "top_nav": {"title": _("Confirm SeedQR"), "show_back_button": False},
-                "status_headline": _("Unreadable!"),
-                "text": _("Your transcribed SeedQR could not be read!"),
-            },
         )
 
         # Skip BACK to the zoomed in transcription view
@@ -1765,15 +1725,13 @@ class SeedTranscribeSeedQRConfirmSuccessView(View):
 
 
     def run(self):
-        self.run_screen(
-            "large_icon_status_screen",
+        self.run_status_screen(
+            status_type=StatusType.SUCCESS,
+            title=_("Confirm SeedQR"),
+            show_back_button=False,
+            status_headline=_("Success!"),
+            text=_("Your transcribed SeedQR successfully scanned and yielded the same seed."),
             button_data=[ButtonOption("OK")],
-            lvgl_cfg={
-                "status_type": "success",
-                "top_nav": {"title": _("Confirm SeedQR"), "show_back_button": False},
-                "status_headline": _("Success!"),
-                "text": _("Your transcribed SeedQR successfully scanned and yielded the same seed."),
-            },
         )
 
         return Destination(SeedOptionsView, view_args={"seed_num": self.seed_num})
@@ -1846,8 +1804,7 @@ class AddressVerificationSigTypeView(View):
         from seedsigner.helpers import embit_utils
         from seedsigner.controller import Controller
         button_data = [self.SINGLE_SIG, self.MULTISIG]
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=_("Verify Address"),
             text=_("Sig type can't be auto-detected from this address. Please specify:"),
             button_data=button_data,
@@ -2098,8 +2055,7 @@ class LoadMultisigWalletDescriptorView(View):
 
     def run(self):
         button_data = [self.SCAN, self.CANCEL]
-        selected_menu_num = self.run_screen(
-            "button_list_screen",
+        selected_menu_num = self.run_button_list_screen(
             title=_("Multisig Verification"),
             text=_("Load your multisig wallet descriptor to verify your receive/self-transfer or change address."),
             is_bottom_list=True,
