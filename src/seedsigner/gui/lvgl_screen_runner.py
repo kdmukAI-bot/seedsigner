@@ -137,7 +137,118 @@ def _translate_event(event):
     return index
 
 
-def run_lvgl_screen(renderer, screen, *, cfg=None, allow_screensaver=True):
+# Pillow accepts CSS color *names* (e.g. "red", "blue") wherever the PIL screens took a
+# fill color; the native LVGL screens parse only 6-digit hex. Translate the names the app
+# actually uses for button/icon styling. Values already in "#rrggbb" form pass through
+# (every GUIConstants color is 6-digit hex).
+_LVGL_NAMED_COLORS = {
+    "red": "#ff0000",
+    "blue": "#0000ff",
+}
+
+
+def _lvgl_color(color):
+    """Map a PIL color name/hex to the 6-digit hex the native screens require.
+
+    None/empty -> None (caller omits the key, native applies its default).
+    """
+    if not color:
+        return None
+    if color.startswith("#"):
+        return color
+    return _LVGL_NAMED_COLORS.get(color.lower(), color)
+
+
+def _serialize_button_option(option):
+    """Build one native ``button_list`` item from a view-layer ``ButtonOption``.
+
+    Returns the bare (resolved) label string when the option carries no per-button
+    styling (byte-identical to the original text-only contract), and the object form
+    ``{"label", "icon"?, "right_icon"?, "icon_color"?, "label_color"?}`` when an icon or
+    color is set. Plain strings pass through unchanged.
+
+    The label is resolved by the option itself (``resolved_label()``, translated or not
+    per ``ButtonOptionWithoutTranslation``): that is the one translation owned below a
+    View's ``run()``, and it stays on the view-layer vocab object, NOT here. This function
+    only shapes the native JSON (icons + color mapping), mirroring how the PIL screens read
+    ``ButtonOption`` fields externally.
+    """
+    if not hasattr(option, "resolved_label"):
+        return option  # already a bare label string
+    label = option.resolved_label()
+    if not (option.icon_name or option.right_icon_name or option.icon_color or option.button_label_color):
+        return label
+    obj = {"label": label}
+    if option.icon_name:
+        obj["icon"] = option.icon_name
+    if option.right_icon_name:
+        obj["right_icon"] = option.right_icon_name
+    if option.icon_color:
+        obj["icon_color"] = _lvgl_color(option.icon_color)
+    if option.button_label_color:
+        obj["label_color"] = _lvgl_color(option.button_label_color)
+    return obj
+
+
+def _assemble_cfg(attrs):
+    """Assemble the native screen cfg from flat view-layer attrs; the ONE place the LVGL
+    JSON shape lives.
+
+    Nests the ``top_nav`` object, serializes ``button_data`` -> ``button_list``, maps the
+    renamed keys (``selected_button`` -> ``initial_selected_index``; ``top_nav_icon_*`` ->
+    ``top_nav.icon*``), color-maps icon colors, copies the remaining flat keys (``text``,
+    ``status_type``, ``is_bottom_list``, ... and any screen-unique keys), and stamps the
+    screensaver policy. ``None`` values are omitted (native applies its default).
+
+    NEVER translates: callers (View ``run()`` methods and the ``run_*_screen`` variants)
+    hand over already-translated strings; the only ``_()`` is ``ButtonOption``'s own, via
+    ``_serialize_button_option``.
+    """
+    attrs = dict(attrs)
+    allow_screensaver = attrs.pop("allow_screensaver", True)
+    cfg = {}
+
+    # top_nav (nested), built from whichever top-nav attrs were passed.
+    top_nav = {}
+    title = attrs.pop("title", None)
+    if title is not None:
+        top_nav["title"] = title
+    show_back_button = attrs.pop("show_back_button", None)
+    if show_back_button is not None:
+        top_nav["show_back_button"] = show_back_button
+    show_power_button = attrs.pop("show_power_button", None)
+    if show_power_button is not None:
+        top_nav["show_power_button"] = show_power_button
+    top_nav_icon_name = attrs.pop("top_nav_icon_name", None)
+    if top_nav_icon_name is not None:
+        top_nav["icon"] = top_nav_icon_name
+    icon_color = _lvgl_color(attrs.pop("top_nav_icon_color", None))
+    if icon_color is not None:
+        top_nav["icon_color"] = icon_color
+    if top_nav:
+        cfg["top_nav"] = top_nav
+
+    # button_data (live ButtonOptions) -> serialized native button_list.
+    button_data = attrs.pop("button_data", None)
+    if button_data is not None:
+        cfg["button_list"] = [_serialize_button_option(b) for b in button_data]
+
+    # PIL-era pixel scroll has no native equivalent; the native screen restores position
+    # from initial_selected_index instead.
+    selected_button = attrs.pop("selected_button", None)
+    if selected_button:
+        cfg["initial_selected_index"] = selected_button
+
+    # Remaining flat keys pass straight through (None == omit/native default).
+    for key, value in attrs.items():
+        if value is not None:
+            cfg[key] = value
+
+    cfg["allow_screensaver"] = allow_screensaver
+    return cfg
+
+
+def run_lvgl_screen(renderer, screen, *, attrs=None):
     """Run an LVGL screen while holding the renderer lock; return its result.
 
     Args:
@@ -146,11 +257,9 @@ def run_lvgl_screen(renderer, screen, *, cfg=None, allow_screensaver=True):
             string is resolved against the native module after init — passing the
             name rather than ``_lv.<fn>`` avoids dereferencing ``_lv`` before the
             runtime exists. A callable is still accepted for direct use.
-        cfg: Optional JSON-style config dict handed to the native screen as its
-            single positional argument (screens that take no config omit it).
-        allow_screensaver: If True (default), the native overlay manager may run
-            the idle screensaver over this screen; set False for screens that must
-            stay up. Carried to the native side via ``cfg["allow_screensaver"]``.
+        attrs: Optional flat dict of view-layer attributes; ``_assemble_cfg`` turns it
+            into the native screen cfg (nesting, serialization, screensaver policy).
+            ``None`` runs a screen that takes no config.
 
     Returns:
         A SeedSigner-compatible return code (int index, RET_CODE constant, or a
@@ -161,24 +270,8 @@ def run_lvgl_screen(renderer, screen, *, cfg=None, allow_screensaver=True):
     # Resolve a screen passed by name now that _lv is guaranteed initialized.
     screen_fn = getattr(_lv, screen) if isinstance(screen, str) else screen
 
-    # Copy any dict cfg so the caller's cfg (which may hold live ButtonOptions used
-    # elsewhere) is never mutated, then stamp the per-screen policy and serialize
-    # button options on the copy.
-    if isinstance(cfg, dict):
-        cfg = dict(cfg)
-        # Per-screen screensaver policy rides in the cfg JSON: the shared parser
-        # reads the key (defaulting absent to allowed) and the native scaffold
-        # stamps the screen object so the overlay dispatcher skips it. Cfg-less
-        # screens (e.g. main_menu) carry no dict and fall through to the default.
-        cfg["allow_screensaver"] = allow_screensaver
-        # Serialize any ButtonOptions in the button_list into their native (string)
-        # form. Screen-agnostic: every screen that carries a button_list
-        # (button_list_screen, large_icon_status_screen, ...) gets the same
-        # treatment. Duck-typed via to_lvgl(); plain strings pass through.
-        if cfg.get("button_list"):
-            cfg["button_list"] = [b.to_lvgl() if hasattr(b, "to_lvgl") else b
-                                  for b in cfg["button_list"]]
-
+    # All LVGL JSON shaping happens here, in the gui layer; Views never build cfg.
+    cfg = _assemble_cfg(attrs) if attrs is not None else None
     args = (cfg,) if cfg is not None else ()
 
     # One contract, two mechanics. On both platforms the native screen fn is a pure
