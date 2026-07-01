@@ -51,8 +51,12 @@ class ST7789(BaseDisplayDriver):
         """Initialize display"""    
         self.reset()
 
+        # 0x78 = 0x70 | 0x08 (BGR bit). The Pi Zero ST7789 panel is BGR-wired, so the
+        # BGR bit must be set (matches the native LVGL driver's MADCTL); without it red
+        # and blue swap and orange renders blue. Both the PIL and LVGL paths feed the
+        # panel R-high RGB565, so the single BGR bit corrects both.
         self.command(0x36)
-        self.data(0x70)                 #self.data(0x00)
+        self.data(0x78)
 
         self.command(0x3A) 
         self.data(0x05)
