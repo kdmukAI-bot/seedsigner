@@ -118,6 +118,8 @@ DETECT_CASES = [
     ("absent_stdlib_queue",    20, "import queue\n"),
     ("extended_slice",         19, "y = data[::-1]\n"),
     ("bit_length_call",        21, "n = x.bit_length()\n"),
+    ("str_zfill",              21, "s = n.zfill(8)\n"),
+    ("unicode_decode_error",   21, "try:\n    pass\nexcept UnicodeDecodeError:\n    pass\n"),
     ("multiple_inheritance",   22, "class C(A, B):\n    pass\n"),
 ]
 
@@ -152,6 +154,10 @@ CLEAN_CASES = [
     ("os_stat_not_path",       18, "os.stat(p)\n"),
     ("simple_slice",           19, "y = data[1:5]\n"),
     ("no_bit_length",          21, "n = len(bin(x)) - 2\n"),
+    # str.zfill in a single-line comment must NOT flag (comment stripping).
+    ("commented_out_zfill",    21, "s = format(n, '08b')  # was: n.zfill(8)\n"),
+    # Catching the UnicodeError base (the correct fix) must NOT flag.
+    ("unicode_error_base",     21, "try:\n    pass\nexcept UnicodeError:\n    pass\n"),
     ("single_base",            22, "class C(Base):\n    pass\n"),
 ]
 
@@ -463,6 +469,34 @@ MPY07_ENFORCED = [
 @pytest.mark.parametrize("cat,violation", MPY07_ENFORCED,
                          ids=[f"cat{c}_{n}" for n, (c, _) in enumerate(MPY07_ENFORCED)])
 def test_mpy07_cryptography_category_enforced(tmp_path, cat, violation):
+    cid = str(cat)
+    assert _real_severities()[cid]["severity"] == "fail"
+    # the business-logic tree is clean of this category
+    assert [i for i in _real_tree_issues() if i.category_id == cat] == []
+    # a fresh violation of this category would block CI under the shipped baseline
+    _, result = _result(tmp_path, violation)
+    exit_code, _ = mpy.evaluate_severity(result, mpy.load_baseline(str(REAL_BASELINE)))
+    assert exit_code == 1
+
+
+# ---------------------------------------------------------------------------
+# Per-stage enforcement proof — mpy/08: builtin/method gaps (category 21)
+#
+# Same shape as the layers above, over the builtin/method gaps this stage drives
+# to zero and flips to `fail`: str.zfill and the UnicodeDecodeError/UnicodeError
+# exception subclasses. The baseline enforces category 21, the tree is clean of
+# it, and a fresh violation would block CI.
+# ---------------------------------------------------------------------------
+
+MPY08_ENFORCED = [
+    (21, "s = n.zfill(8)\n"),
+    (21, "try:\n    pass\nexcept UnicodeDecodeError:\n    pass\n"),
+]
+
+
+@pytest.mark.parametrize("cat,violation", MPY08_ENFORCED,
+                         ids=[f"cat{c}_{n}" for n, (c, _) in enumerate(MPY08_ENFORCED)])
+def test_mpy08_builtin_method_gaps_category_enforced(tmp_path, cat, violation):
     cid = str(cat)
     assert _real_severities()[cid]["severity"] == "fail"
     # the business-logic tree is clean of this category

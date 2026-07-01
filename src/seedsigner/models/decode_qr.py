@@ -444,9 +444,12 @@ class DecodeQR:
             elif DecodeQR.is_base43_psbt(s):
                 return QRType.PSBT__BASE43
 
-        except UnicodeDecodeError:
-            # Probably this isn't meant to be string data; check if it's valid byte data
-            # below.
+        except UnicodeError:
+            # MicroPython has no UnicodeDecodeError builtin (only its UnicodeError base).
+            # bytes.decode('utf-8') on non-UTF-8 input raises UnicodeError on MicroPython
+            # and UnicodeDecodeError (a UnicodeError subclass) on CPython, so this catches
+            # both. Probably this isn't meant to be string data; check if it's valid byte
+            # data below.
             pass
 
         # Is it byte data?
@@ -463,7 +466,9 @@ class DecodeQR:
             try:
                 bitstream = ""
                 for b in s:
-                    bitstream += bin(b).lstrip('0b').zfill(8)
+                    # MicroPython 1.27 has no str.zfill; the format mini-language
+                    # zero-pads to 8 bits on both CPython and MicroPython.
+                    bitstream += "{:08b}".format(b)
                 # print(bitstream)
 
                 return QRType.SEED__COMPACTSEEDQR
