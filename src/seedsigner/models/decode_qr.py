@@ -4,11 +4,11 @@ import re
 
 from binascii import a2b_base64, b2a_base64
 from embit import psbt, bip39
-from pyzbar import pyzbar
-from pyzbar.pyzbar import ZBarSymbol
-from urtypes.crypto import PSBT as UR_PSBT
-from urtypes.crypto import Account, Output
-from urtypes.bytes import Bytes
+
+# pyzbar (native, CPython-only image path) and urtypes (UR payload extraction) are
+# imported LAZILY inside the methods that use them, so this module imports on
+# MicroPython where those packages are absent. On-device the C engine decodes
+# frames (extract_qr_data is unused) and UR extraction requires urtypes present.
 
 from seedsigner.compat.base64 import b32decode, b64decode, b64encode
 from seedsigner.compat.zlib import decompress_raw
@@ -179,6 +179,7 @@ class DecodeQR:
     def get_data_psbt(self):
         if self.complete:
             if self.qr_type == QRType.PSBT__UR2:
+                from urtypes.crypto import PSBT as UR_PSBT
                 cbor = self.decoder.result_message().cbor
                 return UR_PSBT.from_cbor(cbor).data
 
@@ -233,6 +234,8 @@ class DecodeQR:
     def get_wallet_descriptor(self):
         if self.is_wallet_descriptor:
             if self.qr_type in [QRType.OUTPUT__UR, QRType.ACCOUNT__UR, QRType.BYTES__UR]:
+                from urtypes.crypto import Account, Output
+                from urtypes.bytes import Bytes
                 cbor = self.decoder.result_message().cbor
                 if self.qr_type == QRType.OUTPUT__UR:
                     return Output.from_cbor(cbor).descriptor()
@@ -322,6 +325,7 @@ class DecodeQR:
         check = self.qr_type in [QRType.WALLET__SPECTER, QRType.WALLET__UR, QRType.WALLET__CONFIGFILE, QRType.WALLET__GENERIC, QRType.OUTPUT__UR]
         
         if self.qr_type in [QRType.BYTES__UR]:
+            from urtypes.bytes import Bytes
             cbor = self.decoder.result_message().cbor
             raw = Bytes.from_cbor(cbor).data
             data = raw.decode("utf-8").lower()
@@ -339,6 +343,10 @@ class DecodeQR:
         if image is None:
             return None
 
+        # Native, CPython-only image path; never reached on MicroPython (the C
+        # engine decodes camera frames and feeds add_data(bytes) directly).
+        from pyzbar import pyzbar
+        from pyzbar.pyzbar import ZBarSymbol
         barcodes = pyzbar.decode(image, symbols=[ZBarSymbol.QRCODE], binary=is_binary)
 
         # if barcodes:
