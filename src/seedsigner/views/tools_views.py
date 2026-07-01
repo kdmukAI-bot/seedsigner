@@ -381,7 +381,7 @@ class ToolsCalcFinalWordShowFinalWordView(View):
         else:
             # Convert the user's final word selection into its binary index equivalent
             self.selected_final_word = self.controller.storage.pending_mnemonic[-1]
-            self.selected_final_bits = format(wordlist.index(self.selected_final_word), '011b')
+            self.selected_final_bits = "{:011b}".format(wordlist.index(self.selected_final_word))
 
         if coin_flips:
             # fill the last bits (what will eventually be the checksum) with zeros
@@ -410,7 +410,7 @@ class ToolsCalcFinalWordShowFinalWordView(View):
         # And grab the actual final word's checksum bits
         self.actual_final_word = self.controller.storage.pending_mnemonic[-1]
         num_checksum_bits = 4 if mnemonic_length == 12 else 8
-        self.checksum_bits = format(wordlist.index(self.actual_final_word), '011b')[-num_checksum_bits:]
+        self.checksum_bits = "{:011b}".format(wordlist.index(self.actual_final_word))[-num_checksum_bits:]
 
 
     def run(self):

@@ -231,7 +231,7 @@ These fail to **compile** on MicroPython 1.27, so `mpy-cross` (Pass 1) catches t
 
 ## C. Builtin & type gaps
 
-### §21 Builtin/method gaps — *Detection: static (heuristic — may match comments)*
+### §21 Builtin/method gaps — *Detection: static (heuristic; single-line comments ignored)*
 **Why** ([builtin types](https://docs.micropython.org/en/v1.27.0/genrst/builtin_types.html),
 [builtins](https://docs.micropython.org/en/v1.27.0/library/builtins.html)):
 | Avoid | Use |
@@ -241,6 +241,10 @@ These fail to **compile** on MicroPython 1.27, so `mpy-cross` (Pass 1) catches t
 | `s.ljust(n)` / `s.rjust(n)` | `"%-Ns" % s` / `"%Ns" % s` |
 | `s.removeprefix(p)` / `removesuffix` | slice with an explicit length check |
 | `int.to_bytes(n, "big", signed=True)` | `signed=` unsupported — avoid; pass byteorder positionally |
+| `s.zfill(n)` | `"{:0N}".format(x)` / `"%0Nd" % x` / manual pad |
+| `format(x, spec)` builtin | `"{:spec}".format(x)` — the `str.format` method (no `format()` builtin) |
+| `random.shuffle(seq)` | inline Fisher-Yates over `random.random()` / `random.randrange` (no `shuffle`) |
+| `except UnicodeDecodeError` / `UnicodeEncodeError` | catch/raise their `UnicodeError` base (the subclasses are absent) |
 
 ### Builtin runtime hazards (NOT statically checked — verify on device)
 These **run without error but can be wrong** — audit by hand / test on MicroPython:

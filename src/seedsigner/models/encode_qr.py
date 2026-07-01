@@ -136,8 +136,9 @@ class CompactSeedQrEncoder(SeedQrEncoder):
         for word in self.mnemonic:
             index = self.wordlist.index(word)
 
-            # Convert index to binary, strip out '0b' prefix; zero-pad to 11 bits
-            binary_str += bin(index).split('b')[1].zfill(11)
+            # Index as 11-bit zero-padded binary. MicroPython 1.27 has no str.zfill;
+            # the format mini-language zero-pads on both CPython and MicroPython.
+            binary_str += "{:011b}".format(index)
 
         # We can exclude the checksum bits at the end
         if len(self.mnemonic) == 24:

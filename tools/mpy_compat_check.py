@@ -275,14 +275,17 @@ CATEGORIES = {
     21: {
         "name": "Builtin/method gap",
         "description": (
-            "A builtin method missing or behaving differently on MicroPython: "
+            "A builtin method/type missing or behaving differently on MicroPython: "
             "`int.bit_length()`, `int.to_bytes(..., signed=)`, `hash.hexdigest()`, "
-            "`str.ljust/rjust`, `str.removeprefix/removesuffix`."
+            "`str.ljust/rjust`, `str.removeprefix/removesuffix`, `str.zfill`; and the "
+            "`UnicodeDecodeError`/`UnicodeEncodeError` exception subclasses (absent — "
+            "only their `UnicodeError` base exists)."
         ),
         "fix": (
             "bit_length: precompute; to_bytes: avoid `signed=`/keyword byteorder; "
             "hexdigest: `binascii.hexlify(h.digest())`; ljust/rjust: `%`-format; "
-            "removeprefix/suffix: slice with a length check."
+            "removeprefix/suffix: slice with a length check; zfill: `'{:0N}'.format(...)` "
+            "or `'%0Nd' % ...`; Unicode*Error: catch/raise the `UnicodeError` base."
         ),
     },
     22: {
@@ -590,6 +593,15 @@ IMPORT_PATTERNS = [
      "`str.removeprefix/removesuffix` not implemented (PEP 616)"),
     (re.compile(r"\.to_bytes\s*\([^)]*\bsigned\s*="), 21,
      "`int.to_bytes(signed=...)` not supported"),
+    (re.compile(r"\.zfill\s*\("), 21,
+     "`str.zfill()` not implemented (use `'{:0N}'.format(...)` / `'%0Nd' % ...` / manual pad)"),
+    (re.compile(r"(?<![.\w])format\s*\("), 21,
+     "`format()` builtin not implemented (use the `str.format` method, e.g. `'{:011b}'.format(x)`)"),
+    (re.compile(r"\brandom\.shuffle\s*\("), 21,
+     "`random.shuffle()` not implemented (inline Fisher-Yates over `random.random()`/`random.randrange`)"),
+    (re.compile(r"\bUnicode(?:Decode|Encode)Error\b"), 21,
+     "`UnicodeDecodeError`/`UnicodeEncodeError` are not builtins on MicroPython "
+     "(catch/raise their `UnicodeError` base)"),
 ]
 
 
@@ -597,8 +609,12 @@ def scan_import_patterns(file_path, lines):
     """Scan file lines for import-based incompatibilities."""
     issues = []
     for lineno, line in enumerate(lines, 1):
+        # Ignore single-line comments so commented-out code / prose mentioning a
+        # gap isn't flagged (these are heuristic line patterns). Simple split on
+        # the first '#'; deliberately does NOT handle '#' inside string literals.
+        code = line.split("#", 1)[0]
         for pattern, cat_id, msg in IMPORT_PATTERNS:
-            if pattern.search(line):
+            if pattern.search(code):
                 issues.append(Issue(
                     file_path=file_path,
                     line_number=lineno,
