@@ -327,3 +327,80 @@ def run_lvgl_screen(renderer, screen, *, attrs=None):
             time.sleep(0.005)
     finally:
         _lv.set_flush_callback(None)
+
+
+def _make_scan_should_continue():
+    """Build the ``should_continue`` callable that ends a scan on user cancel.
+
+    During a scan the native camera overlay's back button is the only producer
+    feeding the shared UI event queue, so any event drained here (a top-nav back or
+    the overlay's back button) means the user backed out. Returns False to cancel,
+    mirroring the Pi Zero KEY_LEFT semantics.
+
+    The hardware/joystick back source converges on this same signal once the native
+    scan path reaches a device with physical buttons (the Pi at the PIL cutover);
+    today this path is ESP32/touch-only, so only the touch queue feeds it.
+    """
+    def should_continue():
+        # Drain the UI event queue fully each tick: empty -> keep scanning; a
+        # back/button event -> cancel. This is a different queue from the decoded-QR
+        # ring that run_scan drains via camera_scanner.poll_new, so the two never
+        # interfere.
+        while True:
+            event = _lv.poll_for_result()
+            if event is None:
+                return True
+            if event[0] in ("topnav_back", "button_selected"):
+                return False
+    return should_continue
+
+
+def run_scan_screen(decoder, *, allow_screensaver=False):
+    """Drive the native camera-scan pipeline for a ScanView (MicroPython / ESP32).
+
+    Unlike ``run_lvgl_screen`` — which builds a widget tree and polls for a button
+    result — the scan is a camera pipeline: the native ``camera_scanner`` module owns
+    the live preview + overlay, and Python polls decoded QR payloads into ``decoder``
+    via ``scan_consumer.run_scan``. User cancel (the overlay's touch back button, or a
+    hardware back/LEFT press) is surfaced through ``should_continue``.
+
+    Returns the ScanResult; the caller (ScanView) reads ``decoder`` and
+    ``result.cancelled`` to route. Returns ``None`` if the camera failed to start
+    (native bring-up error) so the caller can recover instead of crashing.
+    """
+    ensure_lvgl_runtime()
+    import camera_scanner
+    from seedsigner.hardware.scan_consumer import run_scan
+
+    # The camera preview isn't LVGL "input activity", so the native idle screensaver
+    # would otherwise fire over it. Suspend it for the scan's duration by zeroing the
+    # timeout, then restore (0 disables; runtime-updatable — the overlay-manager
+    # contract). NOTE: after a scan longer than the timeout the inactivity clock is
+    # already past it, so the screensaver may fire on the next screen until a native
+    # activity-reset binding lands — a small follow-up, not a blocker.
+    if not allow_screensaver:
+        _lv.set_screensaver_timeout(0)
+    try:
+        try:
+            camera_scanner.start()
+        except OSError as e:
+            # Native camera bring-up can fail (e.g. resource exhaustion after
+            # repeated scans — a known camera-pipeline teardown leak). Don't let it
+            # crash the app: log and signal failure (None) so ScanView shows a
+            # recoverable notice and returns to the menu.
+            logger.error("camera_scanner.start() failed: %r", e)
+            return None
+        try:
+            # Drop any stale UI events (e.g. the menu button-press that launched us)
+            # so the back-button drain in should_continue can't read one as an
+            # immediate cancel.
+            _lv.clear_result_queue()
+            return run_scan(
+                decoder, scanner=camera_scanner,
+                should_continue=_make_scan_should_continue(),
+            )
+        finally:
+            camera_scanner.stop()
+    finally:
+        if not allow_screensaver:
+            _lv.set_screensaver_timeout(_screensaver_timeout_ms)
