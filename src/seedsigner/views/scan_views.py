@@ -1,6 +1,7 @@
 import logging
 import re
 
+from seedsigner.compat import IS_MICROPYTHON
 from seedsigner.compat.l10n import gettext as _
 from seedsigner.gui.constants import StatusType
 from seedsigner.helpers.l10n import mark_for_translation as _mft
@@ -40,18 +41,35 @@ class ScanView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.scan_screens import ScanScreen
+        if IS_MICROPYTHON:
+            # Native camera scan (ESP32): the native camera_scanner module owns the
+            # live preview + overlay; run_scan_screen drives DecodeQR and returns a
+            # ScanResult. A user cancel (the overlay's touch back button) pops back
+            # one screen, mirroring the Pi Zero "press LEFT to cancel" behavior.
+            from seedsigner.gui.lvgl_screen_runner import run_scan_screen
 
-        # Start the live preview and background QR reading
-        self.run_screen(
-            ScanScreen,
-            instructions_text=self.instructions_text,
-            decoder=self.decoder
-        )
+            result = run_scan_screen(self.decoder)
+            if result is None:
+                # Native camera bring-up failed; recover to a notice + the menu
+                # rather than crashing.
+                return Destination(ScanCameraErrorView)
+            if result.cancelled:
+                return Destination(BackStackView)
+        else:
+            # CPython / Pi Zero: the PIL live-preview screen (blended display), kept
+            # until the Pi camera preview moves to native at the PIL cutover.
+            from seedsigner.gui.screens.scan_screens import ScanScreen
 
-        # A long scan might have exceeded the screensaver timeout; ensure screensaver
-        # doesn't immediately engage when we leave here.
-        self.controller.reset_screensaver_timeout()
+            # Start the live preview and background QR reading
+            self.run_screen(
+                ScanScreen,
+                instructions_text=self.instructions_text,
+                decoder=self.decoder
+            )
+
+            # A long scan might have exceeded the screensaver timeout; ensure
+            # screensaver doesn't immediately engage when we leave here.
+            self.controller.reset_screensaver_timeout()
 
         # Handle the results
         if self.decoder.is_complete:
@@ -224,6 +242,22 @@ class ScanInvalidQRTypeView(View):
             title=_("Scan"),
             status_headline=_("Unknown QR Type"),
             text=_("QRCode is invalid or is a data format not yet supported."),
+            button_data=[ButtonOption("Back to Main Menu")],
+        )
+
+        return Destination(MainMenuView, clear_history=True)
+
+
+
+class ScanCameraErrorView(View):
+    """Shown when the native camera pipeline fails to start (e.g. a resource
+    exhaustion after repeated scans). Recoverable: notify and return to the menu."""
+    def run(self):
+        self.run_status_screen(
+            status_type=StatusType.WARNING,
+            title=_("Scan"),
+            status_headline=_("Camera Unavailable"),
+            text=_("The camera could not be started. Please restart the device and try again."),
             button_data=[ButtonOption("Back to Main Menu")],
         )
 
