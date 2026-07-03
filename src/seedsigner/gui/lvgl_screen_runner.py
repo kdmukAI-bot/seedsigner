@@ -110,6 +110,30 @@ def _make_flush_callback(display_driver):
     return _flush
 
 
+class QRBrightnessEvent:
+    """A native ``qr_brightness`` poll event, surfaced to the QR-display frame driver.
+
+    The native ``qr_display_screen`` emits ``("qr_brightness", <31..255>, "")`` on the
+    shared poll queue whenever the user adjusts the QR background brightness. ``_translate_event``
+    wraps the value in this type so the frame driver can tell it apart from a button-selection
+    index (a bare ``int``): its cue to persist ``SETTING__QR_BRIGHTNESS`` and restart the
+    animated sequence (re-delivering the valuable pure first frames). No other screen emits it.
+    """
+    def __init__(self, value: int):
+        self.value = value
+
+    def __eq__(self, other):
+        # Value-equality (like ButtonOption): keeps unit-test assertions and any
+        # incidental comparisons meaningful. __hash__ left unset -> unhashable, which
+        # is fine (never used as a dict key / set member).
+        if other.__class__ is not self.__class__:
+            return NotImplemented
+        return self.value == other.value
+
+    def __repr__(self):
+        return "QRBrightnessEvent({!r})".format(self.value)
+
+
 def _translate_event(event):
     """Map an LVGL result event tuple to a SeedSigner return code.
 
@@ -118,12 +142,14 @@ def _translate_event(event):
         ("topnav_back", -1, "topnav_back")
         ("topnav_power", -1, "topnav_power")
         ("text_entered", -1, text)            # e.g. a confirmed passphrase
+        ("qr_brightness", 31..255, "")        # QR-display brightness change (mid-screen)
 
     SeedSigner return codes:
         int index (0, 1, 2, ...) for button selection
         RET_CODE__BACK_BUTTON (1000) for back
         RET_CODE__POWER_BUTTON (1001) for power
         str text for a confirmed text-entry screen
+        QRBrightnessEvent for a QR-display brightness change (not a terminal result)
     """
     kind, index, label = event
     if kind == "topnav_back":
@@ -134,6 +160,11 @@ def _translate_event(event):
         # String-valued result (text-entry screens): the entered text rides in
         # the label slot; hand it back to the caller as the string it is.
         return label
+    if kind == "qr_brightness":
+        # A mid-screen brightness change (only qr_display_screen emits this). Wrap the
+        # 31..255 value; without this branch it would fall through to ``return index`` and
+        # be misread as a button index. The QR frame driver consumes it, not a View.
+        return QRBrightnessEvent(index)
     return index
 
 

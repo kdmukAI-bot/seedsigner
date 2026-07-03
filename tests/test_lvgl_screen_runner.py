@@ -19,7 +19,7 @@ sys.modules.setdefault("seedsigner.hardware.buttons", MagicMock())
 import seedsigner.gui.lvgl_screen_runner as lvgl_screen_runner
 from seedsigner.gui.lvgl_screen_runner import (
     _make_flush_callback, _translate_event, _serialize_button_option, _lvgl_color,
-    _assemble_cfg,
+    _assemble_cfg, QRBrightnessEvent,
 )
 from seedsigner.views.view import (
     RET_CODE__BACK_BUTTON, RET_CODE__POWER_BUTTON, View,
@@ -47,6 +47,23 @@ def test_translate_event_back_and_power():
 def test_translate_event_text_entered_returns_string():
     assert _translate_event(("text_entered", -1, "my passphrase")) == "my passphrase"
     assert _translate_event(("text_entered", -1, "")) == ""
+
+
+def test_translate_event_qr_brightness_wraps_value_not_index():
+    # The brightness value rides in the index slot; it must NOT be returned as a bare
+    # int (which the caller would read as a button index). It comes back wrapped.
+    result = _translate_event(("qr_brightness", 200, ""))
+    assert isinstance(result, QRBrightnessEvent)
+    assert result.value == 200
+    assert not isinstance(result, int)
+    # Distinct from a real button selection at the same numeric value.
+    assert result != _translate_event(("button_selected", 200, "x"))
+
+
+def test_qr_brightness_event_value_equality():
+    assert QRBrightnessEvent(31) == QRBrightnessEvent(31)
+    assert QRBrightnessEvent(31) != QRBrightnessEvent(255)
+    assert QRBrightnessEvent(128) != 128
 
 
 # ---------------------------------------------------------------------------
