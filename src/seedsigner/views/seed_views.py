@@ -213,10 +213,11 @@ class SeedMnemonicEntryView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens import seed_screens
-
+        # Native BIP39-word entry (live prefix match panel) on both platforms. The View
+        # hands over the same flat attrs the native seed_mnemonic_entry_screen reads:
+        # title -> top_nav.title, plus initial_letters + wordlist.
         ret = self.run_screen(
-            seed_screens.SeedMnemonicEntryScreen,
+            "seed_mnemonic_entry_screen",
             # TRANSLATOR_NOTE: Inserts the word number (e.g. "Seed Word #6")
             title=_("Seed Word #{}").format(self.cur_word_index + 1),  # Human-readable 1-indexing!
             initial_letters=list(self.cur_word) if self.cur_word else ["a"],
@@ -774,10 +775,15 @@ class SeedExportXpubCustomDerivationView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens import seed_screens
         from seedsigner.controller import Controller
+        # Native keyboard_screen (derivation-path charset). Layout cfg formerly hardcoded in
+        # the PIL SeedExportXpubCustomDerivationScreen; the path is parsed app-side downstream.
         ret = self.run_screen(
-            seed_screens.SeedExportXpubCustomDerivationScreen,
+            "keyboard_screen",
+            title=_("Derivation Path"),
+            keys=list("/'0123456789"),
+            cols=6,
+            show_save_button=True,
             initial_value=self.custom_derivation_path,
         )
 
@@ -1156,10 +1162,16 @@ class SeedBIP85SelectChildIndexView(View):
 
 
     def run(self):
-        # TODO: Change this later to use the generic Screen input keyboard
-        from seedsigner.gui.screens import seed_screens
-
-        ret = self.run_screen(seed_screens.SeedBIP85SelectChildIndexScreen)
+        # Native keyboard_screen (numeric). The View supplies the layout cfg the generic
+        # keyboard needs (formerly hardcoded in the PIL SeedBIP85SelectChildIndexScreen);
+        # the 0 <= index < 2**31 range is still validated app-side below.
+        ret = self.run_screen(
+            "keyboard_screen",
+            title=_("BIP-85 Index"),
+            keys=list("0123456789"),
+            cols=5,
+            show_save_button=True,
+        )
 
         if ret == RET_CODE__BACK_BUTTON:
             return Destination(BackStackView)

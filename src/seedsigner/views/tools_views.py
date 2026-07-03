@@ -236,15 +236,32 @@ class ToolsDiceEntropyEntryView(View):
     
 
     def run(self):
-        from seedsigner.gui.screens.tools_screens import ToolsDiceEntropyEntryScreen
+        # Native keyboard_screen, digit keys 1-6. (The PIL screen showed FontAwesome dice-face
+        # glyphs; those codepoints aren't in the native keyboard icon font — verified on-device,
+        # they abort the screen — so digits are used until the dice glyphs are baked into the
+        # native font. Deferred: dice-face icons via keyboard_font + keys_to_values.)
         ret = self.run_screen(
-            ToolsDiceEntropyEntryScreen,
+            "keyboard_screen",
+            # TRANSLATOR_NOTE: current roll number vs total rolls (e.g. roll 7 of 50). The static
+            # title seeds the top-nav label (required: the native screen crashes on a keystroke
+            # template with no title to update); the template live-updates {n}=current, {total}.
+            # TODO(i18n): the initial title only reuses the legacy positional "{}/{}" msgid to
+            # satisfy that "title must exist" requirement — it duplicates the "{n}/{total}" template
+            # for the same visible text. Phase the legacy string out: once we confirm the native
+            # screen renders title_keystroke_template on the initial build (not just on the first
+            # keystroke), set title=_("Dice Roll {n}/{total}") (same msgid as the template) and drop
+            # the "Dice Roll {}/{}" string, collapsing to a single translatable msgid.
+            title=_("Dice Roll {}/{}").format(1, self.total_rolls),
+            title_keystroke_template=_("Dice Roll {n}/{total}"),
+            keys=list("123456"),
+            cols=3,
             return_after_n_chars=self.total_rolls,
+            show_back_button=True,
         )
 
         if ret == RET_CODE__BACK_BUTTON:
             return Destination(BackStackView)
-        
+
         dice_seed_phrase = mnemonic_generation.generate_mnemonic_from_dice(ret)
 
         # Add the mnemonic as an in-memory Seed
@@ -333,17 +350,31 @@ class ToolsCalcFinalWordFinalizePromptView(View):
 
 class ToolsCalcFinalWordCoinFlipsView(View):
     def run(self):
-        from seedsigner.gui.screens.tools_screens import ToolsCoinFlipEntryScreen
         mnemonic_length = len(self.controller.storage.pending_mnemonic)
 
         if mnemonic_length == 12:
             total_flips = 7
         else:
             total_flips = 3
-        
+
+        # Native keyboard_screen (1/0 keys). Layout + legend cfg formerly hardcoded in the
+        # PIL ToolsCoinFlipEntryScreen. guidance_text splits on "\n" into the two legend lines.
         ret_val = self.run_screen(
-            ToolsCoinFlipEntryScreen,
+            "keyboard_screen",
+            # TRANSLATOR_NOTE: current flip number vs total flips. Static title seeds the top-nav
+            # label (required for the keystroke template); the template live-updates {n}/{total}.
+            # TODO(i18n): phase out the legacy positional "{}/{}" msgid — it only exists to satisfy
+            # the "title must exist" requirement and duplicates the "{n}/{total}" template. Once the
+            # native screen is confirmed to render title_keystroke_template on the initial build,
+            # set title=_("Coin Flip {n}/{total}") and drop "Coin Flip {}/{}", leaving one msgid.
+            title=_("Coin Flip {}/{}").format(1, total_flips),
+            title_keystroke_template=_("Coin Flip {n}/{total}"),
+            keys=list("10"),
+            cols=4,
             return_after_n_chars=total_flips,
+            # TRANSLATOR_NOTE: "Heads = 1" / "Tails = 0" legend shown below the coin-flip keys.
+            guidance_text=_("Heads = 1") + "\n" + _("Tails = 0"),
+            show_back_button=True,
         )
 
         if ret_val == RET_CODE__BACK_BUTTON:
