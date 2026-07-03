@@ -140,6 +140,10 @@ class Controller(Singleton):
 
     image_entropy_preview_frames = None
     image_entropy_final_image = None
+    # Native (ESP32 camera_entropy) result: the (chain, frame) bytes tuple from a capture, held
+    # between the live-preview View and the mnemonic-length View. The native pipeline replaces the
+    # PIL preview-frames + final-image pair above; see run_image_entropy_screen.
+    image_entropy_native_result = None
 
     address_explorer_data: dict = None
 

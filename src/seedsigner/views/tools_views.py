@@ -3,6 +3,7 @@ import logging
 import os
 import time
 
+from seedsigner.compat import IS_MICROPYTHON
 from seedsigner.compat.l10n import gettext as _
 
 from seedsigner.gui.constants import FontAwesomeIconConstants, GUIConstants, SeedSignerIconConstants
@@ -59,13 +60,28 @@ class ToolsMenuView(View):
 ****************************************************************************"""
 class ToolsImageEntropyLivePreviewView(View):
     def run(self):
+        if IS_MICROPYTHON:
+            # Native camera_entropy (ESP32): the module owns the live preview + capture +
+            # frozen-frame review in one overlay, so it collapses the PIL preview + separate
+            # final-image capture/review into a single drive loop. It returns the (chain, frame)
+            # bytes on accept; the mnemonic-length View derives the seed from them. Skip the PIL
+            # ToolsImageEntropyFinalImageView (its capture/review is handled natively).
+            from seedsigner.gui.lvgl_screen_runner import run_image_entropy_screen
+            self.controller.image_entropy_native_result = None
+            result = run_image_entropy_screen()
+            if result is None:
+                # Cancelled, or native camera bring-up failed -> recover to the previous screen.
+                return Destination(BackStackView)
+            self.controller.image_entropy_native_result = result
+            return Destination(ToolsImageEntropyMnemonicLengthView, skip_current_view=True)
+
         from seedsigner.gui.screens.tools_screens import ToolsImageEntropyLivePreviewScreen
         self.controller.image_entropy_preview_frames = None
         ret = self.run_screen(ToolsImageEntropyLivePreviewScreen)
 
         if ret == RET_CODE__BACK_BUTTON:
             return Destination(BackStackView)
-        
+
         self.controller.image_entropy_preview_frames = ret
         return Destination(ToolsImageEntropyFinalImageView)
 
@@ -132,8 +148,30 @@ class ToolsImageEntropyMnemonicLengthView(View):
             return Destination(BackStackView)
 
         mnemonic_length = button_data[selected_menu_num].return_data
+        wordlist_language_code = self.settings.get_value(SettingsConstants.SETTING__WORDLIST_LANGUAGE)
 
-        # The entropy calculation can take time, especially with a full image buffer. 
+        if IS_MICROPYTHON:
+            # Native camera_entropy (ESP32): the firmware already chained the preview frames
+            # (SHA-256); the entropy is sha256(chain + latched_frame). This is a single hash, so
+            # no "Calculating..." spinner is needed (unlike the PIL path, which re-hashes the full
+            # frame buffer here).
+            chain, frame = self.controller.image_entropy_native_result
+            mnemonic = mnemonic_generation.generate_mnemonic_from_camera_entropy(
+                chain, frame, mnemonic_length, wordlist_language_code=wordlist_language_code)
+
+            # Entropy should never stick around in memory
+            self.controller.image_entropy_native_result = None
+            chain = None
+            frame = None
+            mnemonic_bytes = None
+
+            seed = Seed(mnemonic, wordlist_language_code=wordlist_language_code)
+            self.controller.storage.set_pending_seed(seed)
+
+            # Cannot return BACK to this View
+            return Destination(SeedWordsWarningView, view_args={"seed_num": None}, clear_history=True)
+
+        # The entropy calculation can take time, especially with a full image buffer.
         # Show a loading spinner to provide feedback during this delay.
         from seedsigner.gui.screens.screen import LoadingScreenThread
         self.loading_screen = LoadingScreenThread(text=_("Calculating..."))
@@ -182,7 +220,7 @@ class ToolsImageEntropyMnemonicLengthView(View):
             self.controller.image_entropy_final_image = None
 
             # Add the mnemonic as an in-memory Seed
-            seed = Seed(mnemonic, wordlist_language_code=self.settings.get_value(SettingsConstants.SETTING__WORDLIST_LANGUAGE))
+            seed = Seed(mnemonic, wordlist_language_code=wordlist_language_code)
             self.controller.storage.set_pending_seed(seed)
 
         finally:
