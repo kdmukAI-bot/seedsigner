@@ -286,13 +286,13 @@ class Controller(Singleton):
         if not IS_MICROPYTHON:
             from seedsigner.gui.toast import RemoveSDCardToastManagerThread
 
-        # TEMPORARY (LVGL bring-up): the opening splash is still a PIL screen, so it
-        # can't render on MicroPython and would crash the boot before the main menu.
-        # Commented out to unblock the ESP32 running-prototype while its LVGL screen
-        # is pending (a small new screen in seedsigner-lvgl-screens). RESTORE this —
-        # `OpeningSplashView().run()` — once that LVGL splash screen lands.
-        # from seedsigner.views.view import OpeningSplashView
-        # OpeningSplashView().run()
+        # Opening splash — native LVGL screen on both platforms (seedsigner_lvgl_screens
+        # .splash_screen). On MicroPython the firmware already drew the centered logo at C
+        # boot, so the splash continues from it (OpeningSplashView passes logo_already_shown
+        # per platform). Imported lazily so the flow-test harness's patched symbol is picked
+        # up (tests/base.py stubs OpeningSplashView).
+        from seedsigner.views.view import OpeningSplashView
+        OpeningSplashView().run()
 
         """ Class references can be stored as variables in python!
 

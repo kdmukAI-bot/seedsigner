@@ -716,10 +716,25 @@ class OpeningSplashView(View):
         self.__post_init__()
 
     def run(self):
-        from seedsigner.gui.screens.screen import OpeningSplashScreen
+        show_partner_logos = self.settings.get_value(SettingsConstants.SETTING__PARTNER_LOGOS) == SettingsConstants.OPTION__ENABLED
+        if self.force_partner_logos is not None:
+            show_partner_logos = self.force_partner_logos
+
+        # Native LVGL splash on both platforms. The firmware draws the centered logo at C
+        # boot (MICROPY_BOARD_STARTUP, before the REPL/app), so on MicroPython the native
+        # splash continues from that held logo — logo_already_shown skips the fade-in and
+        # slides the version/partner band up from it, seamlessly. On CPython (Pi Zero /
+        # desktop) nothing has drawn the logo yet, so the splash fades it in first.
+        # The native screen owns the logo + partner (HRF) assets and the durations; the
+        # View supplies only the localized text + the two booleans.
         self.run_screen(
-            OpeningSplashScreen,
-            force_partner_logos=self.force_partner_logos
+            "splash_screen",
+            version=f"v{self.controller.VERSION}",
+            show_partner_logos=show_partner_logos,
+            # TRANSLATOR_NOTE: This is on the opening splash screen, displayed above the HRF logo
+            sponsor_text=_("With support from:"),
+            logo_already_shown=IS_MICROPYTHON,
+            allow_screensaver=False,
         )
 
 
