@@ -316,8 +316,10 @@ def generate_screenshots(locale):
 
         screenshot_sections = {
             "Main Menu Views": [
-                ScreenshotConfig(OpeningSplashView, dict(force_partner_logos=True)),
-                ScreenshotConfig(OpeningSplashView, dict(force_partner_logos=False), screenshot_name="OpeningSplashView_no_partner_logos"),
+                # OpeningSplashView migrated to an LVGL screen (native splash_screen), so like
+                # MainMenuView below it can no longer render in the PIL screenshot generator; its
+                # standalone captures (with/without partner logos) drop out, covered by the
+                # seedsigner-lvgl-screens desktop generator. At cutover these return via the View.
                 # MainMenuView migrated to an LVGL screen, so it can no longer render in the
                 # PIL screenshot generator and its standalone capture drops out (its visual is
                 # covered by the seedsigner-lvgl-screens desktop generator). The toast variants
