@@ -325,6 +325,21 @@ class View:
         )
 
 
+    def run_qr_display_screen(self, *, qr_encoder):
+        """Display a static or animated QR.
+
+        Native ``qr_display_screen`` frame driver on MicroPython (the animated UR-fountain case
+        pushes frames + honors the brightness tip); the PIL ``QRDisplayScreen`` on CPython / Pi
+        Zero (blended display), kept until the Pi camera/QR path moves to native at the PIL
+        cutover — mirroring ScanView's ``IS_MICROPYTHON`` split for camera/dynamic screens.
+        Callers ignore the return value and route on their own fixed Destination."""
+        if IS_MICROPYTHON:
+            from seedsigner.gui.lvgl_screen_runner import run_qr_display_screen as _run_qr_display_screen
+            return _run_qr_display_screen(qr_encoder)
+        from seedsigner.gui.screens.screen import QRDisplayScreen
+        return self.run_screen(QRDisplayScreen, qr_encoder=qr_encoder)
+
+
     def run(self, **kwargs) -> 'Destination':
         raise Exception("Must implement in the child class")
 
