@@ -12,6 +12,23 @@ from seedsigner.views import scan_views, seed_views, tools_views
 
 class TestToolsFlows(FlowTest):
 
+    def test_dice_entropy_entry_uses_native_keyboard_cfg(self):
+        """ToolsDiceEntropyEntryView drives the native keyboard_screen with digit keys 1-6 and a
+        keystroke-updated title that is seeded with a static initial title (the native screen
+        aborts on a keystroke template with no title to update — verified on-device)."""
+        from unittest.mock import patch
+        view = tools_views.ToolsDiceEntropyEntryView(total_rolls=50)
+        with patch.object(view, "run_screen", return_value=RET_CODE__BACK_BUTTON) as mock_run_screen:
+            view.run()
+        args, kwargs = mock_run_screen.call_args
+        assert args[0] == "keyboard_screen"
+        assert kwargs["cols"] == 3
+        assert kwargs["keys"] == list("123456")
+        assert kwargs["return_after_n_chars"] == 50
+        # title_keystroke_template requires a companion static title (else native aborts)
+        assert kwargs["title"] and kwargs["title_keystroke_template"]
+
+
     def test__address_explorer__flow(self):
         """
             Test the simplest AddressExplorer flow when a seed is already loaded.
