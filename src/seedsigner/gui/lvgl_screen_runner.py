@@ -435,3 +435,108 @@ def run_scan_screen(decoder, *, allow_screensaver=False):
     finally:
         if not allow_screensaver:
             _lv.set_screensaver_timeout(_screensaver_timeout_ms)
+
+
+def _qr_frame_bytes(part):
+    """The payload bytes for ``qr_display_set_frame`` (the native screen re-encodes them
+    into a QR). Animated parts are UR / Specter strings -> UTF-8; bytes pass through."""
+    if isinstance(part, (bytes, bytearray)):
+        return bytes(part)
+    return part.encode("utf-8")
+
+
+def _encoder_to_qr_cfg(encoder):
+    """Map an ``EncodeQR`` encoder to ``(qr_mode, data_encoding, qr_data)`` for the native
+    ``qr_display_screen``'s INITIAL frame, distinguished by the first part's payload type:
+
+      * ``bytes`` payload (``CompactSeedQrEncoder``) -> ``byte`` / ``hex`` — the binary is
+        hex-serialized into the JSON cfg and the native screen decodes it back.
+      * ``str`` payload (SeedQR digits, xpub, address, signed message, UR fountain frame) ->
+        ``auto`` / ``utf8``.
+
+    ``auto`` matches Python ``qrcode``'s mode auto-detect (numeric > alphanumeric > byte), so
+    the all-numeric SeedQR and the byte xpub/UR frames come out byte-identical to the PIL
+    ``qrcode`` output (parity verified upstream). Note this consumes the encoder's first
+    ``next_part()``; the animated frame loop below continues from there and ``encoder.restart()``
+    rewinds to frame 0 when the brightness tip stows."""
+    from binascii import hexlify
+    part = encoder.next_part()
+    if isinstance(part, (bytes, bytearray)):
+        return "byte", "hex", hexlify(bytes(part)).decode()
+    return "auto", "utf8", part
+
+
+def run_qr_display_screen(encoder, *, allow_screensaver=False):
+    """Drive the native animated QR-display pipeline for a QRDisplayScreen (MicroPython / ESP32).
+
+    The native ``qr_display_screen`` owns rendering + the brightness UI (hardware hints / touch
+    slider) + the brightness tip. Python builds the initial cfg, then — for an animated
+    (UR-fountain) QR — pushes successive frames via ``qr_display_set_frame`` at ~6 fps, holding
+    while ``qr_display_is_tip_active()`` (so the pure first frames stay up), restarting the
+    sequence when the tip stows, and persisting + restarting on a brightness change. Returns when
+    the user exits (``qr_display_done``); the caller routes on its own fixed Destination and
+    ignores the value (parity with the PIL QRDisplayScreen, which also returns nothing useful).
+
+    Mirrors ``run_scan_screen``: a dedicated MicroPython-only frame driver (the View gates it by
+    ``IS_MICROPYTHON``, keeping the PIL QRDisplayScreen on CPython/Pi until the cutover)."""
+    ensure_lvgl_runtime()
+    import time
+    from seedsigner.compat.l10n import gettext as _
+    from seedsigner.models.settings import Settings, SettingsConstants
+    settings = Settings.get_instance()
+
+    qr_mode, data_encoding, first_frame = _encoder_to_qr_cfg(encoder)
+    cfg = {
+        "qr_data": first_frame,
+        "qr_mode": qr_mode,
+        "data_encoding": data_encoding,
+        "initial_brightness": settings.get_value(SettingsConstants.SETTING__QR_BRIGHTNESS),
+        "show_brightness_tips": (
+            settings.get_value(SettingsConstants.SETTING__QR_BRIGHTNESS_TIPS)
+            == SettingsConstants.OPTION__ENABLED),
+        # The native screen holds no strings; hand it the two brightness labels already
+        # translated (mirrors the PIL QRDisplayThread, which localizes them in the gui layer).
+        "brighter_text": _("Brighter"),
+        "darker_text": _("Darker"),
+        "allow_screensaver": allow_screensaver,
+    }
+    is_animated = encoder.seq_len() > 1
+
+    # A QR being read is not LVGL "input activity", so the idle screensaver would otherwise
+    # bounce over it. Suspend it for the screen's duration (0 disables; runtime-updatable —
+    # the overlay-manager contract), then restore. Same known follow-up as run_scan_screen:
+    # after a display longer than the timeout the next screen may screensave immediately.
+    if not allow_screensaver:
+        _lv.set_screensaver_timeout(0)
+    try:
+        _lv.clear_result_queue()
+        _lv.qr_display_screen(cfg)
+        was_tip_active = False
+        while True:
+            event = _lv.poll_for_result()
+            if event is not None:
+                result = _translate_event(event)
+                if isinstance(result, QRBrightnessEvent):
+                    # User adjusted brightness: persist it and restart so the pure first
+                    # frames replay once the tip stows.
+                    settings.set_value(SettingsConstants.SETTING__QR_BRIGHTNESS, result.value)
+                    encoder.restart()
+                    continue
+                # Any other event is the user exiting the screen.
+                return result
+
+            if is_animated:
+                tip_active = _lv.qr_display_is_tip_active()
+                if was_tip_active and not tip_active:
+                    # Tip just stowed -> rewind so the valuable pure first frames replay.
+                    encoder.restart()
+                if not tip_active:
+                    _lv.qr_display_set_frame(_qr_frame_bytes(encoder.next_part()))
+                was_tip_active = tip_active
+
+            time.sleep_ms(166)  # ~6 fps, matching the PIL QRDisplayThread cadence
+    finally:
+        if not allow_screensaver:
+            _lv.set_screensaver_timeout(_screensaver_timeout_ms)
+
+

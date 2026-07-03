@@ -996,11 +996,7 @@ class SeedExportXpubQRDisplayView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import QRDisplayScreen
-        self.run_screen(
-            QRDisplayScreen,
-            qr_encoder=self.qr_encoder
-        )
+        self.run_qr_display_screen(qr_encoder=self.qr_encoder)
 
         return Destination(MainMenuView)
 
@@ -2297,13 +2293,9 @@ class SeedSignMessageSignedMessageQRView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.screen import QRDisplayScreen
         qr_encoder = GenericStaticQrEncoder(data=self.signed_message)
-        
-        self.run_screen(
-            QRDisplayScreen,
-            qr_encoder=qr_encoder,
-        )
+
+        self.run_qr_display_screen(qr_encoder=qr_encoder)
     
         # cleanup
         self.controller.resume_main_flow = None
