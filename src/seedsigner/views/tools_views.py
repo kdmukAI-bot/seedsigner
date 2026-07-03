@@ -731,14 +731,10 @@ class ToolsAddressExplorerAddressView(View):
 
     
     def run(self):
-        from seedsigner.gui.screens.screen import QRDisplayScreen
         from seedsigner.models.encode_qr import GenericStaticQrEncoder
 
         qr_encoder = GenericStaticQrEncoder(data=self.address)
-        self.run_screen(
-            QRDisplayScreen,
-            qr_encoder=qr_encoder,
-        )
+        self.run_qr_display_screen(qr_encoder=qr_encoder)
     
         # Exiting/Cancelling the QR display screen always returns to the list
         return Destination(ToolsAddressExplorerAddressListView, view_args=dict(is_change=self.is_change, start_index=self.start_index, selected_button_index=self.index - self.start_index, initial_scroll=self.parent_initial_scroll), skip_current_view=True)

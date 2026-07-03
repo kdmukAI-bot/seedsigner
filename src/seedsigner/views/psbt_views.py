@@ -555,14 +555,13 @@ class PSBTFinalizeView(View):
 
 class PSBTSignedQRDisplayView(View):
     def run(self):
-        from seedsigner.gui.screens.screen import QRDisplayScreen
         from seedsigner.models.encode_qr import UrPsbtQrEncoder
 
         qr_encoder = UrPsbtQrEncoder(
             psbt=self.controller.psbt,
             qr_density=self.settings.get_value(SettingsConstants.SETTING__QR_DENSITY),
         )
-        self.run_screen(QRDisplayScreen, qr_encoder=qr_encoder)
+        self.run_qr_display_screen(qr_encoder=qr_encoder)
 
         # We're done with this PSBT. Route back to MainMenuView which always
         #   clears all ephemeral data (except in-memory seeds).
