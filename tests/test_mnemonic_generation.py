@@ -1,9 +1,42 @@
+import hashlib
 import pytest
 import random
 
 from embit import bip39
 from seedsigner.helpers import mnemonic_generation
 from seedsigner.models.settings_definition import SettingsConstants
+
+
+def test_generate_mnemonic_from_camera_entropy_12word():
+    """12-word: entropy = first 16 bytes of sha256(chain + frame), matching the PIL final step."""
+    chain = bytes(range(32))
+    frame = b"\xab\xcd\xef\x12" * 16   # stand-in RGB565 latched frame
+    expected_entropy = hashlib.sha256(chain + frame).digest()[:16]
+    expected = mnemonic_generation.generate_mnemonic_from_bytes(expected_entropy)
+
+    result = mnemonic_generation.generate_mnemonic_from_camera_entropy(chain, frame, 12)
+    assert result == expected
+    assert len(result) == 12
+    assert bip39.mnemonic_is_valid(" ".join(result))   # valid BIP-39 checksum
+
+
+def test_generate_mnemonic_from_camera_entropy_24word():
+    """24-word: entropy = full 32-byte sha256(chain + frame)."""
+    chain = bytes([7]) * 32
+    frame = b"\x00\xff" * 32
+    expected_entropy = hashlib.sha256(chain + frame).digest()
+    expected = mnemonic_generation.generate_mnemonic_from_bytes(expected_entropy)
+
+    result = mnemonic_generation.generate_mnemonic_from_camera_entropy(chain, frame, 24)
+    assert result == expected
+    assert len(result) == 24
+    assert bip39.mnemonic_is_valid(" ".join(result))
+
+
+def test_generate_mnemonic_from_camera_entropy_is_deterministic():
+    chain, frame = b"\x01" * 32, b"\x02" * 8
+    assert (mnemonic_generation.generate_mnemonic_from_camera_entropy(chain, frame, 12)
+            == mnemonic_generation.generate_mnemonic_from_camera_entropy(chain, frame, 12))
 
 
 

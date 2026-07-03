@@ -540,3 +540,81 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
             _lv.set_screensaver_timeout(_screensaver_timeout_ms)
 
 
+def run_image_entropy_screen(*, seed_hash=None, allow_screensaver=False):
+    """Drive the native image-entropy capture pipeline (MicroPython / ESP32).
+
+    Mirrors ``run_scan_screen``: the native ``camera_entropy`` module owns the live preview +
+    overlay; Python drives the documented host loop (see modcamera_entropy.c):
+
+        start(seed_hash) -> live preview (poll frames_chained for progress) -> capture() ->
+        poll get_result() -> (chain, frame) -> stop()  [or resume() to reshoot]
+
+    The firmware chains the preview frames (SHA-256) EXCLUDING the latched final frame; the caller
+    derives the seed via ``generate_mnemonic_from_camera_entropy`` (entropy = sha256(chain+frame)).
+
+    Returns the ``(chain, frame)`` bytes tuple on accept, or ``None`` on cancel / camera bring-up
+    failure (the caller recovers to the previous screen). ``seed_hash`` is an optional 32-byte
+    caller-uniqueness seed (NOT the entropy source — the camera frames are); the app passes None.
+
+    NOTE (on-device validation): the preview overlay's event mapping is interpreted like the scan
+    overlay — during preview a ``button_selected`` (the capture control) triggers capture() and a
+    back cancels; after capture a ``button_selected`` accepts and a back reshoots (resume). Confirm
+    the exact capture/accept/reshoot events against the native overlay on-device.
+    """
+    ensure_lvgl_runtime()
+    import time
+    import camera_entropy
+
+    # The camera preview isn't LVGL "input activity", so suspend the idle screensaver for the
+    # capture's duration (0 disables; runtime-updatable), then restore — same as run_scan_screen.
+    if not allow_screensaver:
+        _lv.set_screensaver_timeout(0)
+    try:
+        try:
+            camera_entropy.start(seed_hash)
+        except OSError as e:
+            # Native camera bring-up can fail; recover (None) instead of crashing.
+            logger.error("camera_entropy.start() failed: %r", e)
+            return None
+        try:
+            # Drop any stale UI event (e.g. the menu tap that launched us) so it can't be
+            # misread as an immediate capture/cancel.
+            _lv.clear_result_queue()
+            while True:
+                # --- Preview phase: collect frames until the user captures or cancels. ---
+                captured = False
+                while not captured:
+                    event = _lv.poll_for_result()
+                    if event is not None:
+                        if event[0] == "topnav_back":
+                            return None  # cancelled during preview
+                        if event[0] == "button_selected":
+                            camera_entropy.capture()
+                            captured = True
+                    else:
+                        time.sleep_ms(20)
+
+                # --- Latch: wait for the frozen final frame to be ready + displayed. ---
+                result = None
+                while result is None:
+                    result = camera_entropy.get_result()
+                    if result is None:
+                        time.sleep_ms(5)
+                chain, frame, _n = result
+
+                # --- Review phase: accept the frozen frame, or reshoot (resume + loop). ---
+                while True:
+                    event = _lv.poll_for_result()
+                    if event is not None:
+                        if event[0] == "button_selected":
+                            return (chain, frame)          # accept
+                        if event[0] == "topnav_back":
+                            camera_entropy.resume()        # reshoot -> back to preview
+                            break
+                    else:
+                        time.sleep_ms(20)
+        finally:
+            camera_entropy.stop()
+    finally:
+        if not allow_screensaver:
+            _lv.set_screensaver_timeout(_screensaver_timeout_ms)
