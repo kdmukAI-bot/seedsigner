@@ -931,30 +931,26 @@ class SeedExportXpubDetailsView(View):
 
         else:
             # The derivation calc takes a few moments. Run the loading screen while we wait.
-            from seedsigner.gui.screens.screen import LoadingScreenThread
-            self.loading_screen = LoadingScreenThread(text=_("Generating xpub..."))
-            self.loading_screen.start()
+            # Fire-and-forget spinner; the next screen's run_screen tears it down.
+            from seedsigner.gui.lvgl_screen_runner import run_loading_screen
+            run_loading_screen(_("Generating xpub..."))
 
-            try:
-                from embit.bip32 import HDKey
-                from embit.networks import NETWORKS
-                embit_network = NETWORKS[SettingsConstants.map_network_to_embit(self.settings.get_value(SettingsConstants.SETTING__NETWORK))]
-                version = self.seed.detect_version(
-                    derivation_path,
-                    self.settings.get_value(SettingsConstants.SETTING__NETWORK),
-                    self.sig_type
-                )
-                root = HDKey.from_seed(
-                    self.seed.seed_bytes,
-                    version=embit_network["xprv"]
-                )
-                fingerprint = hexlify(root.child(0).fingerprint).decode('utf-8')
-                xprv = root.derive(derivation_path)
-                xpub = xprv.to_public()
-                xpub_base58 = xpub.to_string(version=version)
-
-            finally:
-                self.loading_screen.stop()
+            from embit.bip32 import HDKey
+            from embit.networks import NETWORKS
+            embit_network = NETWORKS[SettingsConstants.map_network_to_embit(self.settings.get_value(SettingsConstants.SETTING__NETWORK))]
+            version = self.seed.detect_version(
+                derivation_path,
+                self.settings.get_value(SettingsConstants.SETTING__NETWORK),
+                self.sig_type
+            )
+            root = HDKey.from_seed(
+                self.seed.seed_bytes,
+                version=embit_network["xprv"]
+            )
+            fingerprint = hexlify(root.child(0).fingerprint).decode('utf-8')
+            xprv = root.derive(derivation_path)
+            xpub = xprv.to_public()
+            xpub_base58 = xpub.to_string(version=version)
 
             selected_menu_num = self.run_screen(
                 seed_screens.SeedExportXpubDetailsScreen,
