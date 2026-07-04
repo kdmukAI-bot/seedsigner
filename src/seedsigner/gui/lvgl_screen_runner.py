@@ -36,6 +36,7 @@ import logging
 
 from seedsigner.compat import IS_MICROPYTHON
 from seedsigner.compat.threading import Lock
+from seedsigner.models.threads import BaseThread
 from seedsigner.views.view import RET_CODE__BACK_BUTTON, RET_CODE__POWER_BUTTON
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,10 @@ _screensaver_timeout_ms = 0
 # the BackgroundImportThread and by the main thread (the first screen render),
 # and the native init must not run twice.
 _init_lock = Lock()
+
+# Handle to the CPython loading-screen pump thread (None when idle).
+# TRANSITIONAL — delete at the Pi native display-pump cutover (see run_loading_screen).
+_loading_pump = None
 
 
 def ensure_lvgl_runtime():
@@ -357,6 +362,99 @@ def run_lvgl_screen(renderer, screen, *, attrs=None):
                 return _translate_event(event)
             time.sleep(0.005)
     finally:
+        _lv.set_flush_callback(None)
+
+
+class _LoadingPumpThread(BaseThread):
+    """CPython-only: pump LVGL under renderer.lock so the self-animating loading spinner
+    keeps advancing while the main thread blocks in a long task.
+
+    Deliberately does NOT poll_for_result — a loading screen has no terminal event, so
+    the pump can never steal the next screen's result off the queue. TRANSITIONAL:
+    deleted at the Pi native display-pump cutover (see run_loading_screen)."""
+    def __init__(self, renderer):
+        super().__init__()
+        self.renderer = renderer
+
+    def run(self):
+        import time
+        while self.keep_running:
+            with self.renderer.lock:
+                _lv.lvgl_pump(5, 1)
+            time.sleep(0.02)
+
+
+def run_loading_screen(text=None):
+    """Show the native self-animating loading spinner (fire-and-forget).
+
+    Unlike ``run_lvgl_screen``, the loading screen produces no terminal event and is NOT
+    polled: it is a pure builder that returns immediately. Dismiss it simply by loading
+    the next screen — ``View.run_screen`` calls ``stop_loading_pump`` at its dispatch seam
+    and the next build tears the spinner down (its ``LV_EVENT_DELETE`` frees the timer).
+    There is no ``stop()`` at the call site.
+
+      * MicroPython/ESP32: the native display task pumps LVGL, so the spinner animates on
+        its own while the VM thread blocks. Nothing else to do.
+      * CPython/Pi Zero (blended display): LVGL only advances on host ``lvgl_pump``, so we
+        paint one frame and start a background pump thread to keep it animating.
+        TRANSITIONAL — at the Pi native display-pump cutover the native layer pumps in the
+        background like the ESP32 task already does; then this whole CPython branch, the
+        ``_LoadingPumpThread``, and ``stop_loading_pump`` (plus its ``run_screen`` seam
+        call) are deleted and this collapses to the bare ``_lv.loading_screen(cfg)`` build.
+
+    Degrades to a no-op when the native runtime is absent (dev/CI, ``ImportError``) or when
+    the deployed firmware/.so predates the ``loading_screen`` binding, so the app change is
+    safe against whatever binary is currently on-device.
+    """
+    global _loading_pump
+    stop_loading_pump()  # never stack two spinners / two pumps
+    try:
+        ensure_lvgl_runtime()
+    except ImportError:
+        return  # native module absent (dev/CI)
+    if not hasattr(_lv, "loading_screen"):
+        return  # deployed firmware/.so predates the binding
+    cfg = {"text": text} if text else None
+    if IS_MICROPYTHON:
+        _lv.clear_result_queue()
+        _lv.loading_screen(cfg)
+        return
+
+    # CPython blended display: build + paint one frame, then keep it animating via the pump
+    # thread. Mirrors run_lvgl_screen's flush setup; the flush callback stays installed for
+    # the pump's lifetime and is dropped by stop_loading_pump.
+    from seedsigner.gui.renderer import Renderer
+    renderer = Renderer.get_instance()
+    with renderer.lock:
+        _lv.set_flush_mode("python")
+        _lv.set_flush_callback(_make_flush_callback(renderer.disp))
+        _lv.clear_result_queue()
+        _lv.loading_screen(cfg)
+        _lv.lvgl_pump(5, 1)  # paint the first frame before we return
+    _loading_pump = _LoadingPumpThread(renderer)
+    _loading_pump.start()
+
+
+def stop_loading_pump():
+    """Stop the CPython loading-screen pump thread (if any) and drop its flush callback so
+    the following screen takes the panel cleanly. No-op on MicroPython / when idle.
+
+    Called at the ``View.run_screen`` dispatch seam — the one choke point every successor
+    screen (PIL or LVGL) passes through. TRANSITIONAL: deleted at the Pi native
+    display-pump cutover (see run_loading_screen)."""
+    global _loading_pump
+    if _loading_pump is None:
+        return
+    import time
+    pump, _loading_pump = _loading_pump, None
+    pump.stop()
+    # Bounded wait for the pump to finish its current iteration (no join(); matches the
+    # compat.threading idiom) so it can't flush a stale frame over the next screen.
+    for _ in range(20):
+        if not pump.is_alive():
+            break
+        time.sleep(0.005)
+    if _lv is not None:
         _lv.set_flush_callback(None)
 
 

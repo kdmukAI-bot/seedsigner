@@ -84,24 +84,18 @@ class PSBTOverviewView(View):
     def __init__(self):
         super().__init__()
 
-        self.loading_screen = None
-
         if not self.controller.psbt_parser or self.controller.psbt_parser.seed != self.controller.psbt_seed:
-            # The PSBTParser takes a while to read the PSBT. Run the loading screen while
-            # we wait.
-            from seedsigner.gui.screens.screen import LoadingScreenThread
-            self.loading_screen = LoadingScreenThread(text=_("Parsing PSBT..."))
-            self.loading_screen.start()
-                
-            try:
-                self.controller.psbt_parser = PSBTParser(
-                    self.controller.psbt,
-                    seed=self.controller.psbt_seed,
-                    network=self.settings.get_value(SettingsConstants.SETTING__NETWORK)
-                )
-            except Exception as e:
-                self.loading_screen.stop()
-                raise e
+            # The PSBTParser takes a while to read the PSBT. Show the loading spinner while
+            # we wait; fire-and-forget — the next screen's run_screen tears it down (an error
+            # mid-parse propagates and the error View's run_screen does the teardown).
+            from seedsigner.gui.lvgl_screen_runner import run_loading_screen
+            run_loading_screen(_("Parsing PSBT..."))
+
+            self.controller.psbt_parser = PSBTParser(
+                self.controller.psbt,
+                seed=self.controller.psbt_seed,
+                network=self.settings.get_value(SettingsConstants.SETTING__NETWORK)
+            )
 
 
     def run(self):
@@ -128,11 +122,7 @@ class PSBTOverviewView(View):
             else:
                 num_self_transfer_outputs += 1
 
-        # Everything is set. Stop the loading screen
-        if self.loading_screen:
-            self.loading_screen.stop()
-
-        # Run the overview screen
+        # Run the overview screen (its run_screen tears down the loading spinner).
         selected_menu_num = self.run_screen(
             PSBTOverviewScreen,
             spend_amount=psbt_parser.spend_amount,
@@ -365,52 +355,48 @@ class PSBTChangeDetailsView(View):
 
         else:
             # Single sig
-            try:
-                from embit import script
-                from embit.networks import NETWORKS
+            from embit import script
+            from embit.networks import NETWORKS
 
-                if is_change_derivation_path:
-                    loading_screen_text = _("Verifying Change...")
-                else:
-                    loading_screen_text = _("Verifying Self-Transfer...")
-                from seedsigner.gui.screens.screen import LoadingScreenThread
-                loading_screen = LoadingScreenThread(text=loading_screen_text)
-                loading_screen.start()
+            if is_change_derivation_path:
+                loading_screen_text = _("Verifying Change...")
+            else:
+                loading_screen_text = _("Verifying Self-Transfer...")
+            # Fire-and-forget spinner; the next screen's run_screen tears it down.
+            from seedsigner.gui.lvgl_screen_runner import run_loading_screen
+            run_loading_screen(loading_screen_text)
 
-                # convert change address to script pubkey to get script type
-                pubkey = script.address_to_scriptpubkey(change_data["address"])
-                script_type = pubkey.script_type()
-                
-                # extract derivation path to get wallet and change derivation
-                change_path = '/'.join(derivation_path.split("/")[-2:])
-                wallet_path = '/'.join(derivation_path.split("/")[:-2])
-                
-                xpub = self.controller.psbt_seed.get_xpub(
-                    wallet_path=wallet_path,
-                    network=self.settings.get_value(SettingsConstants.SETTING__NETWORK)
+            # convert change address to script pubkey to get script type
+            pubkey = script.address_to_scriptpubkey(change_data["address"])
+            script_type = pubkey.script_type()
+
+            # extract derivation path to get wallet and change derivation
+            change_path = '/'.join(derivation_path.split("/")[-2:])
+            wallet_path = '/'.join(derivation_path.split("/")[:-2])
+
+            xpub = self.controller.psbt_seed.get_xpub(
+                wallet_path=wallet_path,
+                network=self.settings.get_value(SettingsConstants.SETTING__NETWORK)
+            )
+
+            # take script type and call script method to generate address from seed / derivation
+            xpub_key = xpub.derive(change_path).key
+            network = self.settings.get_value(SettingsConstants.SETTING__NETWORK)
+            scriptcall = getattr(script, script_type)
+            if script_type == "p2sh":
+                # single sig only so p2sh is always p2sh-p2wpkh
+                calc_address = script.p2sh(script.p2wpkh(xpub_key)).address(
+                    network=NETWORKS[SettingsConstants.map_network_to_embit(network)]
                 )
-                
-                # take script type and call script method to generate address from seed / derivation
-                xpub_key = xpub.derive(change_path).key
-                network = self.settings.get_value(SettingsConstants.SETTING__NETWORK)
-                scriptcall = getattr(script, script_type)
-                if script_type == "p2sh":
-                    # single sig only so p2sh is always p2sh-p2wpkh
-                    calc_address = script.p2sh(script.p2wpkh(xpub_key)).address(
-                        network=NETWORKS[SettingsConstants.map_network_to_embit(network)]
-                    )
-                else:
-                    # single sig so this handles p2wpkh and p2wpkh (and p2tr in the future)
-                    calc_address = scriptcall(xpub_key).address(
-                        network=NETWORKS[SettingsConstants.map_network_to_embit(network)]
-                    )
+            else:
+                # single sig so this handles p2wpkh and p2wpkh (and p2tr in the future)
+                calc_address = scriptcall(xpub_key).address(
+                    network=NETWORKS[SettingsConstants.map_network_to_embit(network)]
+                )
 
-                if change_data["address"] == calc_address:
-                    is_change_addr_verified = True
-                    button_data = [self.NEXT]
-
-            finally:
-                loading_screen.stop()
+            if change_data["address"] == calc_address:
+                is_change_addr_verified = True
+                button_data = [self.NEXT]
 
         if is_change_addr_verified == False and (not psbt_parser.is_multisig or self.controller.multisig_wallet_descriptor is not None):
             return Destination(PSBTAddressVerificationFailedView, view_args=dict(is_change=is_change_derivation_path, is_multisig=psbt_parser.is_multisig), clear_history=True)
