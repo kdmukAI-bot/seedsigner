@@ -113,6 +113,13 @@ class ScanView(View):
             
             elif self.decoder.is_psbt:
                 from seedsigner.views.psbt_views import PSBTSelectSeedView
+                # Assembling + parsing a large PSBT can stall for a while (notably on ESP32)
+                # after ingestion. Show the fire-and-forget spinner so the device doesn't
+                # look frozen; it persists across get_psbt() and the downstream seed-match
+                # until the next screen's run_screen tears it down. A fast PSBT just flashes
+                # one incidental frame, which is fine.
+                from seedsigner.gui.lvgl_screen_runner import run_loading_screen
+                run_loading_screen(_("Parsing PSBT..."))
                 psbt = self.decoder.get_psbt()
                 self.controller.psbt = psbt
                 self.controller.psbt_parser = None
