@@ -654,10 +654,14 @@ def run_image_entropy_screen(*, seed_hash=None, allow_screensaver=False):
     failure (the caller recovers to the previous screen). ``seed_hash`` is an optional 32-byte
     caller-uniqueness seed (NOT the entropy source — the camera frames are); the app passes None.
 
-    NOTE (on-device validation): the preview overlay's event mapping is interpreted like the scan
-    overlay — during preview a ``button_selected`` (the capture control) triggers capture() and a
-    back cancels; after capture a ``button_selected`` accepts and a back reshoots (resume). Confirm
-    the exact capture/accept/reshoot events against the native overlay on-device.
+    Event mapping (confirmed on-device): the native overlay routes ALL three controls through the
+    shared ``button_selected`` poll-queue event — the shutter and Accept both emit
+    ``on_button_selected(0, ...)``, while the back arrow emits
+    ``on_button_selected(SEEDSIGNER_RET_BACK_BUTTON, "back")``. So back is distinguished by the
+    ``RET_CODE__BACK_BUTTON`` sentinel in the index slot, NOT by a distinct ``topnav_back`` kind
+    (the ESP32 ``poll_for_result`` never emits that kind). During preview: back -> cancel (return
+    None -> View), shutter -> capture(). During review: back -> reshoot (resume() -> preview),
+    Accept -> return the frame. Test back BEFORE the generic button branch, or it gets swallowed.
     """
     ensure_lvgl_runtime()
     import time
@@ -689,8 +693,15 @@ def run_image_entropy_screen(*, seed_hash=None, allow_screensaver=False):
                 while not captured:
                     event = _lv.poll_for_result()
                     if event is not None:
-                        if event[0] == "topnav_back":
-                            return None  # cancelled during preview
+                        # The overlay's back arrow and its shutter BOTH arrive as
+                        # "button_selected" on the poll queue (the native back_button emits
+                        # on_button_selected(SEEDSIGNER_RET_BACK_BUTTON, "back")); the back
+                        # press is distinguished only by the RET_CODE__BACK_BUTTON sentinel
+                        # in the index slot. Test back FIRST — it's a subset of
+                        # button_selected, so the generic branch would otherwise swallow it
+                        # and mis-fire a capture.
+                        if event[0] == "topnav_back" or event[1] == RET_CODE__BACK_BUTTON:
+                            return None  # cancelled during preview -> hand control back to the View
                         if event[0] == "button_selected":
                             camera_entropy.capture()
                             captured = True
@@ -709,11 +720,15 @@ def run_image_entropy_screen(*, seed_hash=None, allow_screensaver=False):
                 while True:
                     event = _lv.poll_for_result()
                     if event is not None:
-                        if event[0] == "button_selected":
-                            return (chain, frame)          # accept
-                        if event[0] == "topnav_back":
+                        # Same discrimination as preview: the back arrow (reshoot) shares the
+                        # "button_selected" kind with the Accept button and is told apart only
+                        # by the RET_CODE__BACK_BUTTON index sentinel. Test back FIRST so it
+                        # can't be misread as an accept.
+                        if event[0] == "topnav_back" or event[1] == RET_CODE__BACK_BUTTON:
                             camera_entropy.resume()        # reshoot -> back to preview
                             break
+                        if event[0] == "button_selected":
+                            return (chain, frame)          # accept
                     else:
                         time.sleep_ms(20)
         finally:
