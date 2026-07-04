@@ -9,7 +9,6 @@ from seedsigner.gui.constants import FontAwesomeIconConstants, GUIConstants, See
 from seedsigner.helpers import mnemonic_generation
 from seedsigner.models.seed import Seed
 from seedsigner.models.settings_definition import SettingsConstants
-from seedsigner.views.seed_views import SeedDiscardView, SeedFinalizeView, SeedMnemonicEntryView, SeedOptionsView, SeedWordsWarningView, SeedExportXpubScriptTypeView
 
 from .view import BackStackView, ButtonOption, Destination, RET_CODE__BACK_BUTTON, View
 
@@ -136,6 +135,8 @@ class ToolsImageEntropyMnemonicLengthView(View):
     TWENTYFOUR_WORDS = ButtonOption("24 words", return_data=24)
 
     def run(self):
+        from seedsigner.views.seed_views import SeedWordsWarningView
+
         button_data = [self.TWELVE_WORDS, self.TWENTYFOUR_WORDS]
 
         selected_menu_num = self.run_button_list_screen(
@@ -271,6 +272,8 @@ class ToolsDiceEntropyEntryView(View):
     
 
     def run(self):
+        from seedsigner.views.seed_views import SeedWordsWarningView
+
         # Native keyboard_screen, digit keys 1-6. (The PIL screen showed FontAwesome dice-face
         # glyphs; those codepoints aren't in the native keyboard icon font — verified on-device,
         # they abort the screen — so digits are used until the dice glyphs are baked into the
@@ -330,6 +333,7 @@ class ToolsCalcFinalWordNumWordsView(View):
 
         self.controller.storage.init_pending_mnemonic(button_data[selected_menu_num].return_data)
 
+        from seedsigner.views.seed_views import SeedMnemonicEntryView
         return Destination(SeedMnemonicEntryView, view_args=dict(is_calc_final_word=True))
 
 
@@ -372,6 +376,7 @@ class ToolsCalcFinalWordFinalizePromptView(View):
         elif button_data[selected_menu_num] == self.SELECT_WORD:
             # Clear the final word slot, just in case we're returning via BACK button
             self.controller.storage.update_pending_mnemonic(None, mnemonic_length - 1)
+            from seedsigner.views.seed_views import SeedMnemonicEntryView
             return Destination(SeedMnemonicEntryView, view_args=dict(is_calc_final_word=True, cur_word_index=mnemonic_length - 1))
 
         elif button_data[selected_menu_num] == self.ZEROS:
@@ -505,6 +510,7 @@ class ToolsCalcFinalWordDoneView(View):
 
     def run(self):
         from seedsigner.gui.screens.tools_screens import ToolsCalcFinalWordDoneScreen
+        from seedsigner.views.seed_views import SeedDiscardView, SeedFinalizeView
         mnemonic = self.controller.storage.pending_mnemonic
         mnemonic_word_length = len(mnemonic)
         final_word = mnemonic[-1]
@@ -569,7 +575,9 @@ class ToolsAddressExplorerSelectSourceView(View):
         self.controller.resume_main_flow = Controller.FLOW__ADDRESS_EXPLORER
 
         if len(seeds) > 0 and selected_menu_num < len(seeds):
+            # User selected one of the n seeds
             selected_seed = seeds[selected_menu_num]
+            from seedsigner.views.seed_views import SeedExportXpubScriptTypeView
             return Destination(
                 SeedExportXpubScriptTypeView,
                 view_args=dict(
@@ -654,6 +662,7 @@ class ToolsAddressExplorerAddressTypeView(View):
 
     def run(self):
         from seedsigner.gui.screens.tools_screens import ToolsAddressExplorerAddressTypeScreen
+        from seedsigner.views.seed_views import SeedOptionsView
         data = self.controller.address_explorer_data
 
         wallet_descriptor_display_name = None
