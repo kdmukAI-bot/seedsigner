@@ -662,12 +662,17 @@ def run_image_entropy_screen(*, seed_hash=None, allow_screensaver=False):
     ensure_lvgl_runtime()
     import time
     import camera_entropy
+    from seedsigner.compat.l10n import gettext as _
 
     # The camera preview isn't LVGL "input activity", so suspend the idle screensaver for the
     # capture's duration (0 disables; runtime-updatable), then restore — same as run_scan_screen.
     if not allow_screensaver:
         _lv.set_screensaver_timeout(0)
     try:
+        # The native overlay holds no strings; hand it the two touch labels already translated
+        # (mirrors the PIL ToolsImageEntropyLivePreviewScreen). Nothing is hardcoded in firmware,
+        # so these must be set before the camera starts or the button/text render blank.
+        camera_entropy.set_labels(_("Capturing image..."), _("Accept"))
         try:
             camera_entropy.start(seed_hash)
         except OSError as e:
