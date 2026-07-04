@@ -5,10 +5,7 @@ import time
 from binascii import hexlify
 from seedsigner.compat.l10n import gettext as _
 
-from embit.descriptor import Descriptor
-
 from seedsigner.gui.constants import FontAwesomeIconConstants, GUIConstants, SeedSignerIconConstants, StatusType
-from seedsigner.models.encode_qr import CompactSeedQrEncoder, GenericStaticQrEncoder, SeedQrEncoder, SpecterLegacyXPubQrEncoder, StaticXpubQrEncoder, UrXpubQrEncoder
 from seedsigner.models.qr_type import QRType
 from seedsigner.models.seed import Seed
 from seedsigner.models.settings import Settings, SettingsConstants
@@ -986,6 +983,8 @@ class SeedExportXpubQRDisplayView(View):
             sig_type=sig_type
         )
 
+        from seedsigner.models.encode_qr import SpecterLegacyXPubQrEncoder, StaticXpubQrEncoder, UrXpubQrEncoder
+
         if xpub_qr_format == SettingsConstants.XPUB_QR_FORMAT__STATIC:
             self.qr_encoder = StaticXpubQrEncoder(**encoder_args)
 
@@ -1533,6 +1532,7 @@ class SeedTranscribeSeedQRWholeQRView(View):
 
         encoder_args = dict(mnemonic=self.seed.mnemonic_list,
                             wordlist_language_code=self.settings.get_value(SettingsConstants.SETTING__WORDLIST_LANGUAGE))
+        from seedsigner.models.encode_qr import CompactSeedQrEncoder, SeedQrEncoder
         if self.seedqr_format == QRType.SEED__SEEDQR:
             e = SeedQrEncoder(**encoder_args)
         elif self.seedqr_format == QRType.SEED__COMPACTSEEDQR:
@@ -1580,6 +1580,7 @@ class SeedTranscribeSeedQRZoomedInView(View):
 
         encoder_args = dict(mnemonic=self.seed.mnemonic_list,
                             wordlist_language_code=self.settings.get_value(SettingsConstants.SETTING__WORDLIST_LANGUAGE))
+        from seedsigner.models.encode_qr import CompactSeedQrEncoder, SeedQrEncoder
         if self.seedqr_format == QRType.SEED__SEEDQR:
             e = SeedQrEncoder(**encoder_args)
         elif self.seedqr_format == QRType.SEED__COMPACTSEEDQR:
@@ -1979,7 +1980,7 @@ class SeedAddressVerificationView(View):
 
 
     class BruteForceAddressVerificationThread(BaseThread):
-        def __init__(self, address: str, seed: Seed, descriptor: Descriptor, script_type: str, embit_network: str, derivation_path: str, threadsafe_counter: ThreadsafeCounter, verified_index: ThreadsafeCounter, verified_index_is_change: ThreadsafeCounter):
+        def __init__(self, address: str, seed: Seed, descriptor: "Descriptor", script_type: str, embit_network: str, derivation_path: str, threadsafe_counter: ThreadsafeCounter, verified_index: ThreadsafeCounter, verified_index_is_change: ThreadsafeCounter):
             """
                 Either seed or descriptor will be None
             """
@@ -2301,6 +2302,7 @@ class SeedSignMessageSignedMessageQRView(View):
 
 
     def run(self):
+        from seedsigner.models.encode_qr import GenericStaticQrEncoder
         qr_encoder = GenericStaticQrEncoder(data=self.signed_message)
 
         self.run_qr_display_screen(qr_encoder=qr_encoder)
