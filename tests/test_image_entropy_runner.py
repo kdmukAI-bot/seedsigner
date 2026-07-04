@@ -21,6 +21,11 @@ class _FakeCameraEntropy:
         self.calls = []
         self._captured = False
         self._start_raises = start_raises
+        self.labels = None
+
+    def set_labels(self, capturing_text, accept_label):
+        self.calls.append("set_labels")
+        self.labels = (capturing_text, accept_label)
 
     def start(self, seed_hash=None):
         self.calls.append("start")
@@ -65,8 +70,12 @@ def test_image_entropy_capture_accept_returns_chain_and_frame(monkeypatch):
     result = lvgl_screen_runner.run_image_entropy_screen()
 
     assert result == (b"C" * 32, b"F" * 8)
-    # Documented host loop order (start -> capture -> get_result -> stop).
-    assert fake_cam.calls[0] == "start"
+    # Overlay strings must be handed over (localized) before the camera starts, or the native
+    # Accept button + "Capturing..." text render blank.
+    assert fake_cam.calls[0] == "set_labels"
+    assert fake_cam.calls[1] == "start"
+    assert fake_cam.labels == ("Capturing image...", "Accept")
+    # Documented host loop order (set_labels -> start -> capture -> get_result -> stop).
     assert "capture" in fake_cam.calls
     assert fake_cam.calls[-1] == "stop"        # always stopped in finally
     assert fake_cam.calls.index("capture") < fake_cam.calls.index("get_result")
