@@ -43,7 +43,7 @@ class BaseTest:
         Settings.SETTINGS_FILENAME = "settings-test.json"
 
         # Mock out the loading screen so it can't spawn. View classes must import locally!
-        patch('seedsigner.gui.screens.screen.LoadingScreenThread').start()
+        patch('seedsigner.gui.lvgl_screen_runner.run_loading_screen').start()
 
         # Controller.start() renders OpeningSplashView before the main loop. The flow
         # harness globally patches View.run_screen, so a real OpeningSplashView would

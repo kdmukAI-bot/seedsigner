@@ -172,60 +172,55 @@ class ToolsImageEntropyMnemonicLengthView(View):
             return Destination(SeedWordsWarningView, view_args={"seed_num": None}, clear_history=True)
 
         # The entropy calculation can take time, especially with a full image buffer.
-        # Show a loading spinner to provide feedback during this delay.
-        from seedsigner.gui.screens.screen import LoadingScreenThread
-        self.loading_screen = LoadingScreenThread(text=_("Calculating..."))
-        self.loading_screen.start()
+        # Show a loading spinner to provide feedback during this delay. Fire-and-forget:
+        # the next screen's run_screen tears the spinner down.
+        from seedsigner.gui.lvgl_screen_runner import run_loading_screen
+        run_loading_screen(_("Calculating..."))
 
+        preview_images = self.controller.image_entropy_preview_frames
+        seed_entropy_image = self.controller.image_entropy_final_image
+
+        # Build in some hardware-level uniqueness via CPU unique Serial num
         try:
-            preview_images = self.controller.image_entropy_preview_frames
-            seed_entropy_image = self.controller.image_entropy_final_image
+            stream = os.popen("cat /proc/cpuinfo | grep Serial")
+            output = stream.read()
+            serial_num = output.split(":")[-1].strip().encode('utf-8')
+            serial_hash = hashlib.sha256(serial_num)
+            hash_bytes = serial_hash.digest()
+        except Exception as e:
+            logger.info(repr(e), exc_info=True)
+            hash_bytes = b'0'
 
-            # Build in some hardware-level uniqueness via CPU unique Serial num
-            try:
-                stream = os.popen("cat /proc/cpuinfo | grep Serial")
-                output = stream.read()
-                serial_num = output.split(":")[-1].strip().encode('utf-8')
-                serial_hash = hashlib.sha256(serial_num)
-                hash_bytes = serial_hash.digest()
-            except Exception as e:
-                logger.info(repr(e), exc_info=True)
-                hash_bytes = b'0'
+        # Build in modest entropy via millis since power on
+        millis_hash = hashlib.sha256(hash_bytes + str(time.time()).encode('utf-8'))
+        hash_bytes = millis_hash.digest()
 
-            # Build in modest entropy via millis since power on
-            millis_hash = hashlib.sha256(hash_bytes + str(time.time()).encode('utf-8'))
-            hash_bytes = millis_hash.digest()
+        # Build in better entropy by chaining the preview frames
+        for frame in preview_images:
+            img_hash = hashlib.sha256(hash_bytes + frame.tobytes())
+            hash_bytes = img_hash.digest()
 
-            # Build in better entropy by chaining the preview frames
-            for frame in preview_images:
-                img_hash = hashlib.sha256(hash_bytes + frame.tobytes())
-                hash_bytes = img_hash.digest()
+        # Finally build in our headline entropy via the new full-res image
+        final_hash = hashlib.sha256(hash_bytes + seed_entropy_image.tobytes()).digest()
 
-            # Finally build in our headline entropy via the new full-res image
-            final_hash = hashlib.sha256(hash_bytes + seed_entropy_image.tobytes()).digest()
+        if mnemonic_length == 12:
+            # 12-word mnemonic only uses the first 128 bits / 16 bytes of entropy
+            final_hash = final_hash[:16]
 
-            if mnemonic_length == 12:
-                # 12-word mnemonic only uses the first 128 bits / 16 bytes of entropy
-                final_hash = final_hash[:16]
+        # Generate the mnemonic
+        mnemonic = mnemonic_generation.generate_mnemonic_from_bytes(final_hash)
 
-            # Generate the mnemonic
-            mnemonic = mnemonic_generation.generate_mnemonic_from_bytes(final_hash)
+        # Image should never get saved nor stick around in memory
+        seed_entropy_image = None
+        preview_images = None
+        final_hash = None
+        hash_bytes = None
+        self.controller.image_entropy_preview_frames = None
+        self.controller.image_entropy_final_image = None
 
-            # Image should never get saved nor stick around in memory
-            seed_entropy_image = None
-            preview_images = None
-            final_hash = None
-            hash_bytes = None
-            self.controller.image_entropy_preview_frames = None
-            self.controller.image_entropy_final_image = None
-
-            # Add the mnemonic as an in-memory Seed
-            seed = Seed(mnemonic, wordlist_language_code=wordlist_language_code)
-            self.controller.storage.set_pending_seed(seed)
-
-        finally:
-            # Stop spinner even if an error occurs
-            self.loading_screen.stop()
+        # Add the mnemonic as an in-memory Seed
+        seed = Seed(mnemonic, wordlist_language_code=wordlist_language_code)
+        self.controller.storage.set_pending_seed(seed)
 
         # Cannot return BACK to this View
         return Destination(SeedWordsWarningView, view_args={"seed_num": None}, clear_history=True)
@@ -710,7 +705,6 @@ class ToolsAddressExplorerAddressListView(View):
 
     def run(self):
         from seedsigner.gui.screens.tools_screens import ToolsAddressExplorerAddressListScreen
-        self.loading_screen = None
 
         addresses = []
         button_data = []
@@ -726,42 +720,38 @@ class ToolsAddressExplorerAddressListView(View):
             addresses = data[addr_storage_key][self.start_index:self.start_index + addrs_per_screen]
 
         else:
-            try:
-                from seedsigner.gui.screens.screen import LoadingScreenThread
-                from seedsigner.helpers import embit_utils
-                # TRANSLATOR_NOTE: a status message that our payment addresses are being calculated
-                self.loading_screen = LoadingScreenThread(text=_("Calculating addrs..."))
-                self.loading_screen.start()
+            from seedsigner.gui.lvgl_screen_runner import run_loading_screen
+            from seedsigner.helpers import embit_utils
+            # TRANSLATOR_NOTE: a status message that our payment addresses are being calculated
+            # Fire-and-forget spinner; the next screen's run_screen tears it down.
+            run_loading_screen(_("Calculating addrs..."))
 
-                if addr_storage_key not in data:
-                    data[addr_storage_key] = []
+            if addr_storage_key not in data:
+                data[addr_storage_key] = []
 
-                if "xpub" in data:
-                    # Single sig explore from seed
-                    if "script_type" in data and data["script_type"] != SettingsConstants.CUSTOM_DERIVATION:
-                        # Standard derivation path
-                        for i in range(self.start_index, self.start_index + addrs_per_screen):
-                            address = embit_utils.get_single_sig_address(xpub=data["xpub"], script_type=data["script_type"], index=i, is_change=self.is_change, embit_network=data["embit_network"])
-                            addresses.append(address)
-                            data[addr_storage_key].append(address)
-                    else:
-                        # TODO: Custom derivation path
-                        raise Exception(_("Custom Derivation address explorer not yet implemented"))
+            if "xpub" in data:
+                # Single sig explore from seed
+                if "script_type" in data and data["script_type"] != SettingsConstants.CUSTOM_DERIVATION:
+                    # Standard derivation path
+                    for i in range(self.start_index, self.start_index + addrs_per_screen):
+                        address = embit_utils.get_single_sig_address(xpub=data["xpub"], script_type=data["script_type"], index=i, is_change=self.is_change, embit_network=data["embit_network"])
+                        addresses.append(address)
+                        data[addr_storage_key].append(address)
+                else:
+                    # TODO: Custom derivation path
+                    raise Exception(_("Custom Derivation address explorer not yet implemented"))
 
-                elif "wallet_descriptor" in data:
-                    from embit.descriptor import Descriptor
-                    descriptor: Descriptor = data["wallet_descriptor"]
-                    if descriptor.is_basic_multisig:
-                        for i in range(self.start_index, self.start_index + addrs_per_screen):
-                            address = embit_utils.get_multisig_address(descriptor=descriptor, index=i, is_change=self.is_change, embit_network=data["embit_network"])
-                            addresses.append(address)
-                            data[addr_storage_key].append(address)
+            elif "wallet_descriptor" in data:
+                from embit.descriptor import Descriptor
+                descriptor: Descriptor = data["wallet_descriptor"]
+                if descriptor.is_basic_multisig:
+                    for i in range(self.start_index, self.start_index + addrs_per_screen):
+                        address = embit_utils.get_multisig_address(descriptor=descriptor, index=i, is_change=self.is_change, embit_network=data["embit_network"])
+                        addresses.append(address)
+                        data[addr_storage_key].append(address)
 
-                    else:
-                        raise Exception(_("Single sig descriptors not yet supported"))
-            finally:
-                # Everything is set. Stop the loading screen
-                self.loading_screen.stop()
+                else:
+                    raise Exception(_("Single sig descriptors not yet supported"))
 
         selected_menu_num = self.run_screen(
             ToolsAddressExplorerAddressListScreen,
