@@ -12,7 +12,7 @@ from embit import psbt, bip39
 
 from seedsigner.compat.base64 import b32decode, b64decode, b64encode
 from seedsigner.compat.zlib import decompress_raw
-from seedsigner.helpers.ur2.ur_decoder import URDecoder
+from seedsigner.helpers.ur2.decoder import URDecoder
 from seedsigner.models.qr_type import QRType
 from seedsigner.models.seed import Seed
 from seedsigner.models.settings import SettingsConstants
