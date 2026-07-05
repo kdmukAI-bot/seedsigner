@@ -105,41 +105,53 @@ class SettingsMenuView(View):
 
 class LocaleSelectionView(View):
     def run(self):
-        from seedsigner.gui.screens import settings_screens
+        # The native language-selection picker renders each language's name in its own
+        # script (live text for Latin, a pre-rendered endonym image for everything
+        # else), so it supersedes the old per-button font override that the LVGL runner
+        # could not forward. The runner wrappers degrade to no-ops off-device (dev/CI).
+        from seedsigner.gui.lvgl_screen_runner import (
+            discover_locale_packs,
+            list_available_locales,
+            set_locale_fonts,
+        )
 
         cur_language_code = self.settings.get_value(SettingsConstants.SETTING__LOCALE)
 
-        selected_button = 0
-        button_data: list[ButtonOption] = []
-        for i, (language_code, display_name) in enumerate(SettingsConstants.get_detected_languages()):
-            button_data.append(
-                # Unique to this View: override each button's font so we can display each
-                # language name in its native script.
-                ButtonOption(
-                    button_label=display_name,
-                    return_data=language_code,
-                    font_name=GUIConstants.get_button_font_name(language_code),
-                    font_size=GUIConstants.get_button_font_size(language_code),
-                )
-            )
+        # Build the picker rows: the app's onboard (.mo-present) locales first, then
+        # any SD-delivered packs the native layer discovers, deduped by code. Each row
+        # carries a clean English + native name; the picker decides live-text vs.
+        # endonym-image per row from the native name's script.
+        rows = []
+        seen = set()
+        for language_code, _display_name in SettingsConstants.get_detected_languages():
+            english, native = SettingsConstants.get_locale_names(language_code)
+            rows.append({"code": language_code, "english": english, "native": native})
+            seen.add(language_code)
 
-            if language_code == cur_language_code:
-                # Highlight the current selection
-                selected_button = i
+        discover_locale_packs()
+        for pack in list_available_locales():
+            code = pack.get("code")
+            if not code or code in seen:
+                continue
+            english, native = SettingsConstants.get_locale_names(code, endonym=pack.get("endonym"))
+            rows.append({"code": code, "english": english, "native": native})
+            seen.add(code)
 
-        selected_menu_num = self.run_screen(
-            settings_screens.SettingsEntryUpdateSelectionScreen,
-            display_name=_(SettingsDefinition.get_settings_entry(attr_name=SettingsConstants.SETTING__LOCALE).display_name),
-            button_data=button_data,
-            selected_button=selected_button,
-            checked_buttons=[selected_button],
+        selected_index = self.run_locale_picker_screen(
+            title=_(SettingsDefinition.get_settings_entry(attr_name=SettingsConstants.SETTING__LOCALE).display_name),
+            active_locale=cur_language_code,
+            rows=rows,
         )
 
-        if selected_menu_num == RET_CODE__BACK_BUTTON:
+        if selected_index == RET_CODE__BACK_BUTTON:
             return Destination(SettingsMenuView)
 
-        # Set the new language
-        self.settings.set_value(SettingsConstants.SETTING__LOCALE, button_data[selected_menu_num].return_data)
+        # Persist + apply. set_value() already re-runs load_locale() (the text catalog:
+        # LANGUAGE env on Pi / the .mo reader on device); set_locale_fonts() swaps the
+        # native LVGL font pack so the new script actually renders.
+        new_locale = rows[selected_index]["code"]
+        self.settings.set_value(SettingsConstants.SETTING__LOCALE, new_locale)
+        set_locale_fonts(new_locale)
 
         return Destination(SettingsMenuView)
 
