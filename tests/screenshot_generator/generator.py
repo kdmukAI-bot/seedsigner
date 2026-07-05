@@ -208,8 +208,11 @@ def generate_screenshots(locale):
                     continue
 
                 if settings_entry.attr_name == SettingsConstants.SETTING__LOCALE:
-                    # Locale selection has its own dedicated View
-                    settings_views_list.append(ScreenshotConfig(settings_views.LocaleSelectionView))
+                    # LocaleSelectionView migrated to the native locale_picker_screen, so it
+                    # can no longer render in the PIL screenshot generator; its capture drops
+                    # out here, covered by the seedsigner-lvgl-screens desktop generator. At
+                    # cutover it returns via the View.
+                    continue
                 else:
                     # Generic SettingsEntry selection View
                     settings_views_list.append(ScreenshotConfig(settings_views.SettingsEntryUpdateSelectionView, dict(attr_name=settings_entry.attr_name), screenshot_name=f"SettingsEntryUpdateSelectionView_{settings_entry.attr_name}"))
