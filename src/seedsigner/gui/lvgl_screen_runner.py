@@ -96,6 +96,11 @@ def ensure_lvgl_runtime():
         # in Python drives the screensaver after this.
         lv.set_screensaver_timeout(_screensaver_timeout_ms)
 
+        # Register any SD-delivered locale packs and load the active locale's font
+        # pack so the very first screen renders in the right script. Direct native
+        # calls (not the public wrappers, which would re-enter this init).
+        _load_active_locale_fonts(lv)
+
         # Publish _lv last: until it is set, other threads keep waiting on the
         # lock rather than seeing a partially-initialized runtime.
         _lv = lv
@@ -226,6 +231,65 @@ def _serialize_button_option(option):
     return obj
 
 
+# The locale-pack root both platforms agree on. The native locale APIs
+# (discover_locale_packs / list_available_locales / set_locale / the picker's
+# endonym-image fetch) default to "lang-packs" relative to the process CWD: on the
+# Pi the packs deploy beside the built .so, on ESP32 they live on the packs
+# partition. Kept as one constant so discovery, the picker, and set_locale all agree.
+LOCALE_PACK_DIR = "lang-packs"
+
+
+# The baked "Western floor" the locale picker can render as LIVE text: ASCII +
+# Latin-1 + Latin Extended-A + General Punctuation (matches the opensans_western font
+# baked into seedsigner-lvgl-screens). A native language name whose glyphs all fall
+# inside these ranges renders live; anything outside needs a pre-rendered endonym
+# image — every non-Latin script AND Vietnamese, whose ế/ệ live in Latin Extended
+# Additional (U+1E00-1EFF), which is NOT baked.
+_BAKED_FLOOR_RANGES = (
+    (0x0000, 0x007F),   # Basic Latin (ASCII)
+    (0x0080, 0x00FF),   # Latin-1 Supplement
+    (0x0100, 0x017F),   # Latin Extended-A
+    (0x2000, 0x206F),   # General Punctuation
+)
+
+
+def endonym_needs_image(native_name):
+    """True if `native_name` has any glyph outside the baked Western floor.
+
+    The picker's live-text-vs-endonym-image rule: fully-covered Latin names (Español,
+    Čeština, Türkçe) render as live text; everything else (CJK, Cyrillic, Greek,
+    Arabic, Devanagari, ... and Vietnamese) is drawn from a pre-rendered image so the
+    picker never has to keep every script's font resident at once.
+    """
+    for ch in native_name:
+        cp = ord(ch)
+        covered = False
+        for lo, hi in _BAKED_FLOOR_RANGES:
+            if lo <= cp <= hi:
+                covered = True
+                break
+        if not covered:
+            return True
+    return False
+
+
+def _serialize_locale_row(row):
+    """Shape one view-layer locale ``{code, english, native}`` into a native picker
+    row ``{locale, english, native, image?}``.
+
+    ``image: True`` (the screen derives the pre-rendered ``endonym_<height>.bin``) is
+    stamped for natives outside the baked floor; omitted for live-text natives.
+    """
+    entry = {
+        "locale": row["code"],
+        "english": row["english"],
+        "native": row["native"],
+    }
+    if endonym_needs_image(row["native"]):
+        entry["image"] = True
+    return entry
+
+
 def _assemble_cfg(attrs):
     """Assemble the native screen cfg from flat view-layer attrs; the ONE place the LVGL
     JSON shape lives.
@@ -269,6 +333,14 @@ def _assemble_cfg(attrs):
     if button_data is not None:
         cfg["button_list"] = [_serialize_button_option(b) for b in button_data]
 
+    # locale_picker rows: view-layer {code, english, native} -> native
+    # {locale, english, native, image?}. The endonym-image decision and the pack dir
+    # are resolved here so the LVGL cfg shape stays in this one place.
+    rows = attrs.pop("rows", None)
+    if rows is not None:
+        cfg["rows"] = [_serialize_locale_row(r) for r in rows]
+        cfg["font_dir"] = LOCALE_PACK_DIR
+
     # PIL-era pixel scroll has no native equivalent; the native screen restores position
     # from initial_selected_index instead.
     selected_button = attrs.pop("selected_button", None)
@@ -282,6 +354,79 @@ def _assemble_cfg(attrs):
 
     cfg["allow_screensaver"] = allow_screensaver
     return cfg
+
+
+# --- Language selection: locale-pack discovery + font switching ----------------
+# All three degrade gracefully when the native runtime is absent (dev/CI machines,
+# non-LVGL builds): the app still runs on the baked Western floor / English.
+
+def discover_locale_packs(font_dir=LOCALE_PACK_DIR):
+    """(Re)scan `font_dir` and register SD-delivered locale packs so set_locale works
+    for locales not baked into the firmware. Returns the count registered, or 0 when
+    the native runtime is absent."""
+    try:
+        ensure_lvgl_runtime()
+    except ImportError:
+        return 0
+    try:
+        return _lv.discover_locale_packs(font_dir)
+    except Exception:
+        return 0
+
+
+def list_available_locales(font_dir=LOCALE_PACK_DIR):
+    """List the locale packs present under `font_dir` — each a dict
+    ``{code, endonym, image, has_image}`` — for assembling the picker. Empty list when
+    the native runtime is absent or no packs are present."""
+    try:
+        ensure_lvgl_runtime()
+    except ImportError:
+        return []
+    try:
+        return _lv.list_available_locales(font_dir)
+    except Exception:
+        return []
+
+
+def set_locale_fonts(locale, font_dir=LOCALE_PACK_DIR):
+    """Load `locale`'s LVGL font pack (glyphs + shaping) so screens render in its
+    script. Returns True on success, False if a pack is missing or the native runtime
+    is absent — either way the app keeps running on the baked Western floor."""
+    try:
+        ensure_lvgl_runtime()
+    except ImportError:
+        return False
+    try:
+        return bool(_lv.set_locale(locale, font_dir))
+    except Exception:
+        # A missing/garbled pack must never block a language change.
+        return False
+
+
+def _load_active_locale_fonts(lv):
+    """One-time, init-time locale-pack discovery + active-locale font load.
+
+    Called from ensure_lvgl_runtime() with the freshly imported `lv`, so it uses the
+    native APIs directly rather than the public wrappers above (which would re-enter
+    that init). Guarded end-to-end: any failure leaves the baked Western floor in
+    place and never blocks runtime bring-up. English (no pack) is a graceful no-op.
+    """
+    try:
+        lv.discover_locale_packs(LOCALE_PACK_DIR)
+    except Exception:
+        pass
+    try:
+        from seedsigner.models.settings import Settings
+        from seedsigner.models.settings_definition import SettingsConstants
+        locale = Settings.get_instance().get_value(SettingsConstants.SETTING__LOCALE)
+    except Exception:
+        return
+    if not locale:
+        return
+    try:
+        lv.set_locale(locale, LOCALE_PACK_DIR)
+    except Exception:
+        pass
 
 
 def run_lvgl_screen(renderer, screen, *, attrs=None):

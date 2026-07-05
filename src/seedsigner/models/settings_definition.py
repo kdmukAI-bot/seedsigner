@@ -183,6 +183,55 @@ class SettingsConstants:
     }
 
 
+    # (english_name, native_name) per locale, for the language-selection picker's
+    # "English | native" rows. Kept in sync with the single source of truth in
+    # seedsigner-lvgl-screens/tools/i18n/supported_locales.json (which the font-pack +
+    # endonym-image pipeline reads); duplicated here because that file isn't shipped to
+    # the app. Unlike ALL_LOCALES (whose values fold in "(beta)"/parenthetical-English
+    # decorations for the legacy list), these are the clean names the native picker
+    # shows. The picker decides live-text vs. pre-rendered endonym image from the NATIVE
+    # name's glyph coverage, not from this table.
+    LOCALE_NAMES = {
+        LOCALE__ENGLISH: ("English", "English"),
+        LOCALE__PORTUGUESE_BR: ("Brazilian Portuguese", "Português do Brasil"),
+        LOCALE__CATALAN: ("Catalan", "Català"),
+        LOCALE__CZECH: ("Czech", "Čeština"),
+        LOCALE__DUTCH: ("Dutch", "Nederlands"),
+        LOCALE__FRENCH: ("French", "Français"),
+        LOCALE__GERMAN: ("German", "Deutsch"),
+        LOCALE__GREEK: ("Greek", "Ελληνικά"),
+        LOCALE__HINDI: ("Hindi", "हिन्दी"),
+        LOCALE__INDONESIAN: ("Indonesian", "Bahasa Indonesia"),
+        LOCALE__ITALIAN: ("Italian", "Italiano"),
+        LOCALE__JAPANESE: ("Japanese", "日本語"),
+        LOCALE__KOREAN: ("Korean", "한국어"),
+        LOCALE__NORWEGIAN: ("Norwegian", "Norsk"),
+        LOCALE__PERSIAN: ("Persian", "فارسی"),
+        LOCALE__POLISH: ("Polish", "Polski"),
+        LOCALE__RUSSIAN: ("Russian", "Русский"),
+        LOCALE__CHINESE_SIMPLIFIED: ("Simplified Chinese", "简体中文"),
+        LOCALE__SPANISH: ("Spanish", "Español"),
+        LOCALE__THAI: ("Thai", "ไทย"),
+        LOCALE__TURKISH: ("Turkish", "Türkçe"),
+        LOCALE__URDU: ("Urdu", "اردو"),
+        LOCALE__VIETNAMESE: ("Vietnamese", "Tiếng Việt"),
+    }
+
+
+    @classmethod
+    def get_locale_names(cls, locale, endonym=None):
+        """Return ``(english_name, native_name)`` for `locale`, for a picker row.
+
+        Sourced from ``LOCALE_NAMES``. For an SD-discovered pack not in that table,
+        fall back to the pack manifest's ``endonym`` as the native name and the locale
+        code as the English label.
+        """
+        entry = cls.LOCALE_NAMES.get(locale)
+        if entry is not None:
+            return entry
+        return (locale, endonym or locale)
+
+
     @classmethod
     def get_detected_languages(cls) -> list[tuple[str, str]]:
         """
