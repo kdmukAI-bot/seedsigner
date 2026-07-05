@@ -277,6 +277,32 @@ class View:
         )
 
 
+    def run_locale_picker_screen(
+        self,
+        *,
+        title,
+        active_locale,
+        rows,
+        show_back_button=True,
+    ) -> int:
+        """Run the native ``locale_picker_screen`` (language selection); the typed
+        entry point for :class:`LocaleSelectionView`.
+
+        ``rows`` is a list of ``{"code", "english", "native"}`` dicts in display order.
+        The runner shapes them into the native cfg — the live-text-vs-endonym-image
+        decision and the pack dir live there — and the native screen check-marks the
+        row whose ``locale`` matches ``active_locale``. Returns the selected row index,
+        or ``RET_CODE__BACK_BUTTON``.
+        """
+        return self.run_screen(
+            "locale_picker_screen",
+            title=title,
+            show_back_button=show_back_button,
+            active_locale=active_locale,
+            rows=rows,
+        )
+
+
     # Per-status_type default title + confirm-button label, filled when the caller omits
     # them. Defined once here (not repeated at every call site, where they'd drift) and
     # marked for extraction with _mft; run_status_screen translates them. Mirrors the
