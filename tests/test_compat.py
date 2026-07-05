@@ -32,7 +32,10 @@ imports without `tests/base.py`'s mock scaffolding.
 """
 
 import _thread
+import builtins
+import importlib
 import os
+import sys
 import time
 import types
 
@@ -111,25 +114,72 @@ def test_set_locale_falls_back_to_putenv_without_environ(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# l10n shim — MicroPython stub path (exercised directly)
+# l10n shim — MicroPython path (reimported with stdlib gettext hidden)
 # ---------------------------------------------------------------------------
+# The device path resolves gettext/ngettext against a loaded `.mo` catalog, falling
+# back to an English passthrough when none is loaded. CPython always takes the
+# real-gettext branch, so these reimport compat.l10n as if `gettext` were absent to
+# cover the passthrough floor. (Catalog-backed translation is covered end-to-end in
+# tests/test_l10n_micropython.py and tests/test_compat_mo.py.)
+
+def _reimport_l10n_without_gettext():
+    """Return a fresh compat.l10n imported as if stdlib gettext were absent, plus a
+    restore() that reinstates the real CPython module for later tests."""
+    modname = "seedsigner.compat.l10n"
+    saved = sys.modules.pop(modname, None)
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "gettext":
+            raise ImportError("simulated MicroPython: no gettext")
+        return real_import(name, *args, **kwargs)
+
+    builtins.__import__ = fake_import
+    try:
+        mod = importlib.import_module(modname)
+    finally:
+        builtins.__import__ = real_import
+
+    def restore():
+        sys.modules.pop(modname, None)
+        if saved is not None:
+            sys.modules[modname] = saved
+        else:
+            importlib.import_module(modname)
+
+    return mod, restore
+
 
 def test_l10n_identity_passthrough():
-    assert compat_l10n._identity("verbatim") == "verbatim"
+    mod, restore = _reimport_l10n_without_gettext()
+    try:
+        assert mod._gettext is None  # confirm the MicroPython branch
+        # No catalog loaded -> gettext returns the source verbatim.
+        assert mod.gettext("verbatim") == "verbatim"
+    finally:
+        restore()
 
 
 def test_l10n_ngettext_passthrough_picks_form():
-    # No catalogs on-device, so the passthrough picks by the English plural rule.
-    assert compat_l10n._identity_ngettext("input", "inputs", 1) == "input"
-    assert compat_l10n._identity_ngettext("input", "inputs", 2) == "inputs"
-    assert compat_l10n._identity_ngettext("input", "inputs", 0) == "inputs"
+    # No catalog loaded, so the passthrough picks by the English plural rule.
+    mod, restore = _reimport_l10n_without_gettext()
+    try:
+        assert mod.ngettext("input", "inputs", 1) == "input"
+        assert mod.ngettext("input", "inputs", 2) == "inputs"
+        assert mod.ngettext("input", "inputs", 0) == "inputs"
+    finally:
+        restore()
 
 
 def test_l10n_noop_domain_setters():
-    assert compat_l10n._noop_bindtextdomain("messages", "/some/dir") == "/some/dir"
-    assert compat_l10n._noop_bindtextdomain("messages") is None
-    assert compat_l10n._noop_textdomain("messages") == "messages"
-    assert compat_l10n._noop_textdomain() is None
+    mod, restore = _reimport_l10n_without_gettext()
+    try:
+        assert mod.bindtextdomain("messages", "/some/dir") == "/some/dir"
+        assert mod.bindtextdomain("messages") is None
+        assert mod.textdomain("messages") == "messages"
+        assert mod.textdomain() is None
+    finally:
+        restore()
 
 
 # ===========================================================================
