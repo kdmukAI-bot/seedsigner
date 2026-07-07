@@ -287,3 +287,24 @@ def test_assemble_cfg_status_screen_shape():
     assert cfg["top_nav"] == {"title": "Invalid Mnemonic!", "show_back_button": False}
     assert cfg["text"] == "Checksum failure."
     assert cfg["button_list"] == [_("OK")]
+
+
+def test_assemble_cfg_custom_status_forwards_hero_icon_and_color():
+    # StatusType.CUSTOM: the caller-supplied hero icon glyph + color ride as TOP-LEVEL
+    # cfg keys (not under top_nav, which carries the back/power/title chrome), matching
+    # the native large_icon_status_screen "custom" contract.
+    from seedsigner.gui.constants import SeedSignerIconConstants, GUIConstants
+    cfg = _assemble_cfg({
+        "status_type": "custom",
+        "title": "Action Required",
+        "icon": SeedSignerIconConstants.MICROSD,
+        "icon_color": GUIConstants.WARNING_COLOR,
+        "warning_edges": True,
+        "button_data": [ButtonOption("Continue")],
+    })
+    assert cfg["status_type"] == "custom"
+    assert cfg["icon"] == SeedSignerIconConstants.MICROSD
+    assert cfg["icon_color"] == GUIConstants.WARNING_COLOR
+    assert cfg["warning_edges"] is True
+    # The hero icon is top-level, NOT folded into top_nav.
+    assert "icon" not in cfg["top_nav"]

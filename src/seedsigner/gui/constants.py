@@ -164,6 +164,9 @@ class StatusType:
     ERROR = "error"                # Red "X". A device/system fault; a bug worth reporting.
                                    # Narrow: only UnhandledException, CameraConnectionError,
                                    # and the ErrorView base.
+    CUSTOM = "custom"              # No fixed icon: the caller supplies the hero icon glyph
+                                   # + color (e.g. PSBTFinalize's SIGN icon). One screen
+                                   # renders any large-icon prompt.
 
 
 class ButtonStyle:
