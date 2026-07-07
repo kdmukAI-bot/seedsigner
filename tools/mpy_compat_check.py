@@ -59,6 +59,9 @@ EXCLUDED_FILES = [
 # import-time PIL-freeness is verified (category 23) rather than silently assumed.
 FORCE_INCLUDED_FILES = [
     "src/seedsigner/gui/constants.py",
+    # The reusable LVGL cfg builders + integer-only amount formatters run on-device in
+    # the shared View path (PSBT screens), so their MicroPython-safety is verified here.
+    "src/seedsigner/gui/lvgl_config.py",
 ]
 
 # Third-party dependency classification
