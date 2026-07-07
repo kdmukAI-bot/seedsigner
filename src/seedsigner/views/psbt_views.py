@@ -1,8 +1,9 @@
 from seedsigner.compat.l10n import gettext as _
+from seedsigner.compat.l10n import ngettext
 
 from seedsigner.models.psbt_parser import PSBTParser
 from seedsigner.models.settings import SettingsConstants
-from seedsigner.gui.constants import FontAwesomeIconConstants, SeedSignerIconConstants, StatusType
+from seedsigner.gui.constants import FontAwesomeIconConstants, GUIConstants, SeedSignerIconConstants, StatusType
 from seedsigner.views.view import (BackStackView, ButtonOption, Destination, MainMenuView,
     NotYetImplementedView, RET_CODE__BACK_BUTTON, View)
 
@@ -99,16 +100,16 @@ class PSBTOverviewView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.psbt_screens import PSBTOverviewScreen
+        from seedsigner.gui.lvgl_config import btc_amount_from_sats
         psbt_parser = self.controller.psbt_parser
 
         change_data = psbt_parser.change_data
         """
             change_data = [
                 {
-                    'address': 'bc1q............', 
-                    'amount': 397621401, 
-                    'fingerprint': ['22bde1a9', '73c5da0a'], 
+                    'address': 'bc1q............',
+                    'amount': 397621401,
+                    'fingerprint': ['22bde1a9', '73c5da0a'],
                     'derivation_path': ['m/48h/1h/0h/2h/1/0', 'm/48h/1h/0h/2h/1/0']
                 }, {},
             ]
@@ -122,17 +123,47 @@ class PSBTOverviewView(View):
             else:
                 num_self_transfer_outputs += 1
 
+        # Headline amount: the spend on a normal send, or the change on a self-transfer
+        # (no external recipients), matching the PIL overview's callout.
+        if not psbt_parser.destination_addresses:
+            headline_sats = psbt_parser.change_amount
+        else:
+            headline_sats = psbt_parser.spend_amount
+
+        # Translated labels for the transaction-flow pictogram (generic structural words —
+        # it conveys structure, not addresses). Each key falls back to English natively if
+        # omitted, so this is purely the i18n pass; the native screen owns the layout.
+        labels = {
+            # TRANSLATOR_NOTE: Single-input transaction label in the tx-flow diagram
+            "one_input": _("1 input"),
+            # TRANSLATOR_NOTE: Input number will be inserted (e.g. "input 3")
+            "input_n": _("input {}"),
+            # TRANSLATOR_NOTE: Indicates that items have been omitted from a series: e.g. "1, 2, 3, [...], 8"
+            "ellipsis_series": _("[ ... ]"),
+            # TRANSLATOR_NOTE: Inserts the recipient number (e.g. the fifth one is: "recipient 5")
+            "recipient_n": _("recipient {}"),
+            "recipient_1": _("recipient 1"),
+            "recipient_singular": _("recipient"),
+            "self_transfer": _("self-transfer"),
+            "fee": _("fee"),
+            # TRANSLATOR_NOTE: Technical term, should probably NOT be translated in most languages
+            "op_return": _("OP_RETURN"),
+            # TRANSLATOR_NOTE: Label for a change output in the PSBT Overview flow diagram
+            "change": _("change"),
+        }
+
         # Run the overview screen (its run_screen tears down the loading spinner).
         selected_menu_num = self.run_screen(
-            PSBTOverviewScreen,
-            spend_amount=psbt_parser.spend_amount,
-            change_amount=psbt_parser.change_amount,
-            fee_amount=psbt_parser.fee_amount,
+            "psbt_overview_screen",
+            title=_("Review Transaction"),
+            button_data=[ButtonOption("Review details")],
+            btc_amount=btc_amount_from_sats(headline_sats),
             num_inputs=psbt_parser.num_inputs,
             num_self_transfer_outputs=num_self_transfer_outputs,
             num_change_outputs=num_change_outputs,
             destination_addresses=psbt_parser.destination_addresses,
             has_op_return=psbt_parser.op_return_data is not None,
+            labels=labels,
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
@@ -204,20 +235,53 @@ class PSBTMathView(View):
         + change value
     """
     def run(self):
-        from seedsigner.gui.screens.psbt_screens import PSBTMathScreen
+        from seedsigner.gui.lvgl_config import format_btc, format_sats
         psbt_parser: PSBTParser = self.controller.psbt_parser
         if not psbt_parser:
             # Should not be able to get here
             return Destination(MainMenuView)
-        
+
+        num_recipients = psbt_parser.num_destinations
+
+        # Denomination + host-formatted (integer-math) amount strings. The native screen
+        # right-aligns and pads them into the fee equation, so we pass them UNPADDED. Btc
+        # mode keeps the fee in sats (parity with the PIL math screen).
+        if psbt_parser.input_amount > 1_000_000:
+            denomination = "btc"
+            unit_word = _("btc")
+            amounts = {
+                "input": format_btc(psbt_parser.input_amount),
+                "spend": format_btc(psbt_parser.spend_amount),
+                "fee": str(psbt_parser.fee_amount),
+                "change": format_btc(psbt_parser.change_amount),
+            }
+        else:
+            denomination = "sats"
+            unit_word = _("sats")
+            amounts = {
+                "input": format_sats(psbt_parser.input_amount),
+                "spend": format_sats(psbt_parser.spend_amount),
+                "fee": format_sats(psbt_parser.fee_amount),
+                "change": format_sats(psbt_parser.change_amount),
+            }
+
+        # Already-localized (and pluralized) info words drawn after each amount.
+        labels = {
+            "inputs": ngettext("input", "inputs", psbt_parser.num_inputs),
+            "recipients": ngettext("recipient", "recipients", num_recipients),
+            "fee": _("fee"),
+            # TRANSLATOR_NOTE: Denomination is inserted (e.g. your "btc change" or "sats change")
+            "change": _("{} change").format(unit_word),
+        }
+
         selected_menu_num = self.run_screen(
-            PSBTMathScreen,
-            input_amount=psbt_parser.input_amount,
-            num_inputs=psbt_parser.num_inputs,
-            spend_amount=psbt_parser.spend_amount,
-            num_recipients=psbt_parser.num_destinations,
-            fee_amount=psbt_parser.fee_amount,
-            change_amount=psbt_parser.change_amount,
+            "psbt_math_screen",
+            title=_("Transaction Math"),
+            button_data=[ButtonOption("Review recipients")],
+            denomination=denomination,
+            num_recipients=num_recipients,
+            amounts=amounts,
+            labels=labels,
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
@@ -241,7 +305,7 @@ class PSBTAddressDetailsView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.psbt_screens import PSBTAddressDetailsScreen
+        from seedsigner.gui.lvgl_config import btc_amount_from_sats
         psbt_parser: PSBTParser = self.controller.psbt_parser
 
         if not psbt_parser:
@@ -261,11 +325,11 @@ class PSBTAddressDetailsView(View):
             button_data.append(ButtonOption("Next"))
 
         selected_menu_num = self.run_screen(
-            PSBTAddressDetailsScreen,
+            "psbt_address_details_screen",
             title=title,
             button_data=button_data,
             address=psbt_parser.destination_addresses[self.address_num],
-            amount=psbt_parser.destination_amounts[self.address_num],
+            btc_amount=btc_amount_from_sats(psbt_parser.destination_amounts[self.address_num]),
         )
         
         if selected_menu_num == RET_CODE__BACK_BUTTON:
@@ -299,7 +363,7 @@ class PSBTChangeDetailsView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.psbt_screens import PSBTChangeDetailsScreen
+        from seedsigner.gui.lvgl_config import btc_amount_from_sats
         psbt_parser: PSBTParser = self.controller.psbt_parser
 
         if not psbt_parser:
@@ -401,18 +465,26 @@ class PSBTChangeDetailsView(View):
         if is_change_addr_verified == False and (not psbt_parser.is_multisig or self.controller.multisig_wallet_descriptor is not None):
             return Destination(PSBTAddressVerificationFailedView, view_args=dict(is_change=is_change_derivation_path, is_multisig=psbt_parser.is_multisig), clear_history=True)
 
+        if is_change_derivation_path:
+            # TRANSLATOR_NOTE: Describes the address type (change or receive)
+            addr_type = _("change address")
+        else:
+            addr_type = _("receive address")
+        # TRANSLATOR_NOTE: Symbol for index number, e.g. "address #3"
+        index_num_symbol = _("#")
+        # note: NOT marking this for translation, hoping that the var ordering will not
+        # need to change in other languages.
+        address_type_label = f"{addr_type} {index_num_symbol}{derivation_path_addr_index}"
+
         selected_menu_num = self.run_screen(
-            PSBTChangeDetailsScreen,
+            "psbt_change_details_screen",
             title=title,
             button_data=button_data,
             address=change_data.get("address"),
-            amount=change_data.get("amount"),
-            is_multisig=psbt_parser.is_multisig,
-            fingerprint=seed_fingerprint,
-            derivation_path=derivation_path,
-            is_change_derivation_path=is_change_derivation_path,
-            derivation_path_addr_index=derivation_path_addr_index,
-            is_change_addr_verified=is_change_addr_verified,
+            btc_amount=btc_amount_from_sats(change_data.get("amount")),
+            address_type_label=address_type_label,
+            is_verified=is_change_addr_verified,
+            verified_text=_("Address verified!"),
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
@@ -504,7 +576,6 @@ class PSBTFinalizeView(View):
     
     def run(self):
         from embit.psbt import PSBT
-        from seedsigner.gui.screens.psbt_screens import PSBTFinalizeScreen
 
         psbt_parser: PSBTParser = self.controller.psbt_parser
         psbt: PSBT = self.controller.psbt
@@ -512,10 +583,16 @@ class PSBTFinalizeView(View):
         if not psbt_parser:
             # Should not be able to get here
             return Destination(MainMenuView)
-        
-        selected_menu_num = self.run_screen(
-            PSBTFinalizeScreen,
-            button_data=[self.APPROVE_PSBT]
+
+        # Custom large-icon status screen: the SIGN glyph in the info color over a
+        # click-to-approve prompt (native parity with the PIL PSBTFinalizeScreen).
+        selected_menu_num = self.run_status_screen(
+            status_type=StatusType.CUSTOM,
+            icon=SeedSignerIconConstants.SIGN,
+            icon_color=GUIConstants.INFO_COLOR,
+            title=_("Sign Transaction"),
+            text=_("Click to approve this transaction"),
+            button_data=[self.APPROVE_PSBT],
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
