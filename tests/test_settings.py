@@ -100,6 +100,45 @@ class TestSettings(BaseTest):
         _verify_defaults_loaded(SettingsConstants.SETTING__SIG_TYPES)
 
 
+    def test_save_survives_micropython_json_dump_without_indent(self, monkeypatch):
+        """ Bug A: MicroPython 1.27's json.dump has no `indent` kwarg. save() must not
+        pass it — doing so raises TypeError *after* open('w') truncated the file, leaving
+        settings.json empty and bricking the next boot. """
+        import seedsigner.models.settings as settings_mod
+
+        # Reproduce stock MicroPython: json.dump rejects any kwargs, and _JSON_KWARGS={}.
+        real_dump = json.dump
+        def strict_dump(obj, fp, **kwargs):
+            if kwargs:
+                raise TypeError("extra keyword arguments given")
+            return real_dump(obj, fp)
+        monkeypatch.setattr(settings_mod.json, "dump", strict_dump)
+        monkeypatch.setattr(settings_mod, "_JSON_KWARGS", {})
+
+        settings = Settings.get_instance()
+        # Each set_value triggers save() through the mpy-strict dump; must not raise.
+        settings.set_value(SettingsConstants.SETTING__PERSISTENT_SETTINGS, SettingsConstants.OPTION__ENABLED)
+        settings.set_value(SettingsConstants.SETTING__QR_DENSITY, SettingsConstants.DENSITY__HIGH)
+
+        # The file must be valid, non-empty JSON that reloads.
+        with open(Settings.SETTINGS_FILENAME) as settings_file:
+            data = json.load(settings_file)
+        assert data[SettingsConstants.SETTING__QR_DENSITY] == SettingsConstants.DENSITY__HIGH
+
+
+    def test_corrupt_settings_file_boots_to_defaults(self):
+        """ Bug A hardening: a truncated/empty or garbled settings.json must never brick
+        boot — Settings.get_instance() falls back to defaults instead of raising. """
+        for corrupt in ("", "{not valid json", "\x00\x00"):
+            with open(Settings.SETTINGS_FILENAME, "w") as settings_file:
+                settings_file.write(corrupt)
+            # Wipe the singleton WITHOUT deleting the file (reset_settings would remove it).
+            Settings._instance = None
+
+            settings = Settings.get_instance()  # must not raise
+            assert settings.get_value(SettingsConstants.SETTING__LOCALE) == SettingsConstants.LOCALE__ENGLISH
+
+
 
 class SettingsQRBase(BaseTest):
     """

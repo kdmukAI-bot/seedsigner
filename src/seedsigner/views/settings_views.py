@@ -125,10 +125,11 @@ class LocaleSelectionView(View):
 
         cur_language_code = self.settings.get_value(SettingsConstants.SETTING__LOCALE)
 
-        # Build the picker rows: the app's onboard (.mo-present) locales first, then
-        # any SD-delivered packs the native layer discovers, deduped by code. Each row
-        # carries a clean English + native name; the picker decides live-text vs.
-        # endonym-image per row from the native name's script.
+        # Build the picker rows: the locales whose catalog (.mo) is present first, then
+        # the packs the native layer discovers under the pack root (each manifest is
+        # registered here so its font is loadable), deduped by code. Each row carries a
+        # clean English + native name; the picker decides live-text vs. endonym-image
+        # per row from the native name's script.
         rows = []
         seen = set()
         for language_code, _display_name in SettingsConstants.get_detected_languages():

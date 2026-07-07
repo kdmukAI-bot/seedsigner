@@ -2,11 +2,19 @@ import logging
 import json
 import os
 
+from seedsigner.compat import IS_MICROPYTHON
 from seedsigner.compat.l10n import bindtextdomain, set_locale, textdomain
 from seedsigner.models.settings_definition import SettingsConstants, SettingsDefinition
 from seedsigner.models.singleton import Singleton
 
 logger = logging.getLogger(__name__)
+
+# MicroPython 1.27's json.dump/dumps has NO `indent` keyword — passing it raises
+# TypeError. In save() that happens *after* open('w') has already truncated the file,
+# which left settings.json empty and bricked the next boot. Decide the kwargs once
+# (so there is no literal `indent=` on a dump call site); pretty-print only on CPython.
+# The on-disk JSON is equivalent either way.
+_JSON_KWARGS = {} if IS_MICROPYTHON else {"indent": 4}
 
 
 def _path_exists(path: str) -> bool:
@@ -38,17 +46,24 @@ class Settings(Singleton):
 
             settings._data = SettingsDefinition.get_defaults()
 
-            # Read persistent settings file, if it exists
+            # Read persistent settings file, if it exists. A corrupt/empty settings.json
+            # (e.g. a truncated write) must NEVER brick boot — fall back to defaults.
+            # ValueError covers MicroPython's JSON "syntax error" and CPython's
+            # JSONDecodeError; OSError covers read faults.
             if _path_exists(Settings.SETTINGS_FILENAME):
-                with open(Settings.SETTINGS_FILENAME) as settings_file:
-                    settings.update(json.load(settings_file))
+                try:
+                    with open(Settings.SETTINGS_FILENAME) as settings_file:
+                        settings.update(json.load(settings_file))
+                except (ValueError, OSError):
+                    logger.error("Ignoring unreadable %s; using defaults", Settings.SETTINGS_FILENAME)
 
-            # Setup multilanguage support. __file__ is .../seedsigner/models/settings.py;
-            # back out two path segments to reach the seedsigner package root, then build
-            # the l10n path with string ops (os.path / pathlib are absent on MicroPython).
-            package_root = __file__.rsplit("/", 2)[0]
-            path = "/".join([package_root, "resources", "seedsigner-translations", "l10n"])
-            bindtextdomain('messages', localedir=path)
+            # Setup multilanguage support. The catalog root — where each locale's
+            # <locale>/LC_MESSAGES/messages.mo lives — is resolved once in
+            # SettingsConstants.get_catalog_root() so the runtime gettext LOOKUP here and
+            # the picker's catalog SCAN (get_detected_languages) stay pointed at the SAME
+            # place: the bundled seedsigner-translations on CPython, the microSD pack root
+            # on ESP32 (self-contained language packs' .mo).
+            bindtextdomain('messages', localedir=SettingsConstants.get_catalog_root())
             textdomain('messages')
 
             # Load default/persistent locale setting
@@ -127,14 +142,14 @@ class Settings(Singleton):
 
 
     def __str__(self):
-        return json.dumps(self._data, indent=4)
+        return json.dumps(self._data, **_JSON_KWARGS)
     
 
     def save(self):
         from seedsigner.hardware.microsd import MicroSD
         if self._data[SettingsConstants.SETTING__PERSISTENT_SETTINGS] == SettingsConstants.OPTION__ENABLED and MicroSD.get_instance().is_inserted:
             with open(Settings.SETTINGS_FILENAME, 'w') as settings_file:
-                json.dump(self._data, settings_file, indent=4)
+                json.dump(self._data, settings_file, **_JSON_KWARGS)
                 # SeedSignerOS makes removing the microsd possible, flush and then fsync forces persistent settings to disk
                 # without this, recent settings changes could be missing after the microsd card was removed
                 settings_file.flush()

@@ -25,12 +25,13 @@ class TestSettingsDefinition(BaseTest):
         # Should only fail if we've absolutely crushed the global translations!!!
         assert absent_language_code is not None
 
-        # get_detected_languages walks the fixed l10n/<locale>/LC_MESSAGES/*.mo layout
-        # via os.listdir (os.walk is absent on MicroPython). Mock that traversal to
-        # report a tree containing only "en" plus the otherwise-absent language code,
-        # each with a .mo file present.
+        # get_detected_languages walks the fixed <catalog-root>/<locale>/LC_MESSAGES/*.mo
+        # layout via os.listdir (os.walk is absent on MicroPython). Mock that traversal
+        # to report a tree containing only "en" plus the otherwise-absent language code,
+        # each with a .mo file present. Key on get_catalog_root() so the mock tracks the
+        # root wherever it points (the pack root "lang-packs" / "/sd", not a fixed dir).
         def mocked_listdir(path):
-            if path.endswith("l10n"):
+            if path == SettingsConstants.get_catalog_root():
                 return ["en", absent_language_code]
             if path.endswith("LC_MESSAGES"):
                 return ["messages.po", "messages.mo"]

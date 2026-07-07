@@ -1,11 +1,24 @@
 from gettext import gettext as _
 
+import pytest
+
 from base import BaseTest
+from langpack_catalog import packs_available
 from seedsigner.gui.screens.screen import ButtonOption
 from seedsigner.helpers.l10n import mark_for_translation as _mft
 from seedsigner.models.settings import Settings
 from seedsigner.models.settings_definition import SettingsConstants
 from seedsigner.views.view import MainMenuView
+
+
+# Asserting that translation ACTUALLY happens needs real pack catalogs staged in
+# src/lang-packs; skip cleanly when they're absent (English-only clone / build). The
+# English-passthrough assertions below run regardless (that's the no-packs invariant).
+requires_packs = pytest.mark.skipif(
+    not packs_available(),
+    reason="no packs staged in src/lang-packs "
+           "(build: ../seedsigner-language-packs/scripts/build_packs.sh --out-dir src/lang-packs)",
+)
 
 
 
@@ -19,12 +32,14 @@ class TestGettext(BaseTest):
         assert _(test_str) == test_str
     
 
+    @requires_packs
     def test_basic_spanish(self):
         settings = Settings.get_instance()
         settings.set_value(SettingsConstants.SETTING__LOCALE, SettingsConstants.LOCALE__SPANISH)
         assert _("Home") != "Home"
 
 
+    @requires_packs
     def test_locale_changes(self):
         settings = Settings.get_instance()
 
@@ -60,6 +75,7 @@ class TestButtonOption(BaseTest):
         assert FooClass.HOME.button_label == "Home"
 
 
+    @requires_packs
     def test_gettext_translates_class_level_button_option(self):
         settings = Settings.get_instance()
         settings.set_value(SettingsConstants.SETTING__LOCALE, SettingsConstants.LOCALE__SPANISH)
@@ -94,6 +110,7 @@ class TestMarkForTranslation(BaseTest):
         assert FooClass.home == "Home"
 
 
+    @requires_packs
     def test_gettext_translates_class_level_mft_attr(self):
         settings = Settings.get_instance()
         settings.set_value(SettingsConstants.SETTING__LOCALE, SettingsConstants.LOCALE__SPANISH)
