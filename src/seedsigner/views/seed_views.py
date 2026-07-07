@@ -319,16 +319,20 @@ class SeedFinalizeView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens import seed_screens
-
         button_data = [self.FINALIZE]
         self.PASSPHRASE.button_label = self.seed.passphrase_label
         if self.settings.get_value(SettingsConstants.SETTING__PASSPHRASE) != SettingsConstants.OPTION__DISABLED:
             button_data.append(self.PASSPHRASE)
 
+        # Native finalize-seed screen (fingerprint readout + bottom buttons). The screen
+        # owns the icon/layout and forces show_back_button off; the View supplies the
+        # fingerprint value + the localized title/label/buttons.
         selected_menu_num = self.run_screen(
-            seed_screens.SeedFinalizeScreen,
+            "seed_finalize_screen",
+            title=_("Finalize Seed"),
             fingerprint=self.fingerprint,
+            # TRANSLATOR_NOTE: Label above the seed's master fingerprint value
+            fingerprint_label=_("fingerprint"),
             button_data=button_data,
         )
 
