@@ -61,13 +61,6 @@ jobs:
         with:
           # Needs to also pull the seedsigner-translations repo
           submodules: recursive
-      - name: Download language packs
-        # The app reads packs from src/lang-packs (CWD-relative "lang-packs" root).
-        # With them present the language tests run; without, they'd skip.
-        uses: actions/download-artifact@v4
-        with:
-          name: lang-packs
-          path: src/lang-packs
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
@@ -80,6 +73,29 @@ jobs:
           pip install -e .
       - name: Compile translations
         run: python setup.py compile_catalog
+      # No-packs scenario (the other half of the screens CI model, §5): src/lang-packs is
+      # still empty here — packs are downloaded in the next step — so this guards the
+      # pure-reader invariant, that with NO packs the pack-dependent language tests SKIP
+      # cleanly and the English-only tests PASS (never fail), keeping a clean clone / an
+      # English-only build a supported config. Folded in before the download (a targeted
+      # subset) rather than as a separate job, so it reuses this job's setup + install.
+      - name: Test with no packs (English-only invariant)
+        run: |
+          python -m pytest \
+            tests/test_english_only_without_packs.py \
+            tests/test_l10n.py \
+            tests/test_flows_l10n.py \
+            tests/test_locale_picker.py \
+            tests/test_compat_mo.py \
+            tests/test_l10n_micropython.py \
+            --color=yes -vv
+      - name: Download language packs
+        # The app reads packs from src/lang-packs (CWD-relative "lang-packs" root); with
+        # them present the full language suite below runs instead of skipping.
+        uses: actions/download-artifact@v4
+        with:
+          name: lang-packs
+          path: src/lang-packs
       - name: Test with pytest
         run: |
           mkdir artifacts
@@ -111,13 +127,3 @@ jobs:
         # Upload also when tests fail. The workflow result (red/green) will
         # be not effected by this.
         if: always()
-
-# POSSIBLE FUTURE JOB — "no-packs run" (the other half of the screens repo's language-pack
-# CI model, docs/language-pack-production-and-delivery-notes.md §5). A job that runs the
-# suite with an EMPTY src/lang-packs (skip the pack build/download) to guard the
-# pure-reader invariant end-to-end: the pack-dependent language tests skip cleanly and the
-# English-only-without-packs tests pass, so a clean clone / a streamlined English-only build
-# stays a supported, CI-verified config. Not wired yet — the English-only behavior is already
-# exercised inside the `test` job above (the invariant tests patch the catalog root to empty),
-# so this would only add a guard that the skip-when-empty path itself never regresses to a
-# failure when no packs are present.
