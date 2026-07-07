@@ -414,12 +414,18 @@ def set_locale_fonts(locale, font_dir=LOCALE_PACK_DIR):
 
 
 def _load_active_locale_fonts(lv):
-    """One-time, init-time locale-pack discovery + active-locale font load.
+    """One-time, init-time (post-microSD-mount) locale bring-up: pack discovery, the
+    active locale's font pack, AND a reload of its gettext ``.mo`` catalog.
 
-    Called from ensure_lvgl_runtime() with the freshly imported `lv`, so it uses the
-    native APIs directly rather than the public wrappers above (which would re-enter
-    that init). Guarded end-to-end: any failure leaves the baked Western floor in
-    place and never blocks runtime bring-up. English (no pack) is a graceful no-op.
+    Called from ensure_lvgl_runtime() with the freshly imported `lv` — and on ESP32 that
+    native import is what mounts the microSD, where both the packs and the ``.mo``
+    catalogs live. Settings init loaded the catalog EARLIER (before the card was
+    mounted), so ``compat.l10n`` fail-softed to the English passthrough; re-applying the
+    locale here — now that the card is available — is what makes a persisted-at-boot
+    locale actually render translated TEXT, not just switch fonts. Uses the native APIs
+    directly (not the public wrappers above, which would re-enter this init); guarded
+    end-to-end so any failure leaves the baked English floor in place and never blocks
+    bring-up. English (no pack / no catalog) is a graceful no-op.
     """
     try:
         lv.discover_locale_packs(LOCALE_PACK_DIR)
@@ -428,13 +434,21 @@ def _load_active_locale_fonts(lv):
     try:
         from seedsigner.models.settings import Settings
         from seedsigner.models.settings_definition import SettingsConstants
-        locale = Settings.get_instance().get_value(SettingsConstants.SETTING__LOCALE)
+        settings = Settings.get_instance()
+        locale = settings.get_value(SettingsConstants.SETTING__LOCALE)
     except Exception:
         return
     if not locale:
         return
     try:
-        lv.set_locale(locale, LOCALE_PACK_DIR)
+        lv.set_locale(locale, LOCALE_PACK_DIR)   # fonts (native)
+    except Exception:
+        pass
+    try:
+        # Text: reload the .mo now that /sd (ESP32) is mounted. On CPython this is an
+        # idempotent re-set of the LANGUAGE env; on MicroPython it is the actual catalog
+        # (re)load that the pre-mount Settings init could not do.
+        settings.load_locale()
     except Exception:
         pass
 
