@@ -11,6 +11,13 @@ src/seedsigner/models/settings_definition.json
 *.po
 *.mo
 
+# Staged language packs (subset fonts + runs.bin + endonym images + .mo catalogs)
+# copied from the pinned deps/language-packs submodule by
+# scripts/stage_language_packs.sh. Build artifacts — never committed; the submodule
+# is the source of truth. (This is the CWD-relative pack root the app reads on the Pi;
+# on ESP32 the packs live at /sd, populated by the platform build.)
+/src/lang-packs/
+
 # WIP integration plan/strategy docs — AI-assisted dev scaffolding kept working-tree-only.
 # The seedsigner fork is the shared collaboration point; these must not enter the history
 # that gets extracted upstream.

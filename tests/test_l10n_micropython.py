@@ -13,11 +13,12 @@ import sys
 
 import pytest
 
+from langpack_catalog import resolve_catalog_root
 
-L10N_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)),
-    "src", "seedsigner", "resources", "seedsigner-translations", "l10n",
-)
+
+# Catalogs come from the staged language packs (src/lang-packs) when built, else the
+# bundled translations submodule — <root>/<locale>/LC_MESSAGES/messages.mo either way.
+CATALOG_ROOT = resolve_catalog_root()
 
 
 @pytest.fixture
@@ -48,12 +49,12 @@ def mpy_l10n():
 
 
 def _es_available():
-    return os.path.exists(os.path.join(L10N_DIR, "es", "LC_MESSAGES", "messages.mo"))
+    return os.path.exists(os.path.join(CATALOG_ROOT, "es", "LC_MESSAGES", "messages.mo"))
 
 
 def test_english_base_locale_passes_through(mpy_l10n):
     l = mpy_l10n
-    l.bindtextdomain("messages", localedir=L10N_DIR)
+    l.bindtextdomain("messages", localedir=CATALOG_ROOT)
     l.textdomain("messages")
     # English ships no catalog -> the source strings pass through unchanged.
     l.set_locale("en")
@@ -64,9 +65,10 @@ def test_english_base_locale_passes_through(mpy_l10n):
 
 def test_spanish_catalog_translates(mpy_l10n):
     if not _es_available():
-        pytest.skip("es catalog not compiled (run: python setup.py compile_catalog)")
+        pytest.skip("es messages.mo not staged in src/lang-packs "
+                    "(build: ../seedsigner-language-packs/scripts/build_packs.sh --out-dir src/lang-packs)")
     l = mpy_l10n
-    l.bindtextdomain("messages", localedir=L10N_DIR)
+    l.bindtextdomain("messages", localedir=CATALOG_ROOT)
     l.set_locale("es")
     assert l.gettext("Scan") == "Escanear"
     # ngettext dispatches to the catalog's 3-form Spanish rule without error.
@@ -75,9 +77,9 @@ def test_spanish_catalog_translates(mpy_l10n):
 
 def test_switch_to_missing_locale_fails_closed(mpy_l10n):
     if not _es_available():
-        pytest.skip("es catalog not compiled")
+        pytest.skip("es messages.mo not staged in src/lang-packs")
     l = mpy_l10n
-    l.bindtextdomain("messages", localedir=L10N_DIR)
+    l.bindtextdomain("messages", localedir=CATALOG_ROOT)
     l.set_locale("es")
     assert l.gettext("Scan") == "Escanear"
     # Switching to a locale with no catalog reverts to the English passthrough.
