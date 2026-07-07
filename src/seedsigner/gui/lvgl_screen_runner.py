@@ -181,26 +181,10 @@ def _translate_event(event):
     return index
 
 
-# Pillow accepts CSS color *names* (e.g. "red", "blue") wherever the PIL screens took a
-# fill color; the native LVGL screens parse only 6-digit hex. Translate the names the app
-# actually uses for button/icon styling. Values already in "#rrggbb" form pass through
-# (every GUIConstants color is 6-digit hex).
-_LVGL_NAMED_COLORS = {
-    "red": "#ff0000",
-    "blue": "#0000ff",
-}
-
-
-def _lvgl_color(color):
-    """Map a PIL color name/hex to the 6-digit hex the native screens require.
-
-    None/empty -> None (caller omits the key, native applies its default).
-    """
-    if not color:
-        return None
-    if color.startswith("#"):
-        return color
-    return _LVGL_NAMED_COLORS.get(color.lower(), color)
+# The reusable cfg builders + the PIL-color -> hex mapping live in lvgl_config (MP-safe,
+# one definition each). Imported here so this module (and its existing importers) still
+# expose _lvgl_color, and _assemble_cfg can build the top_nav sub-object.
+from seedsigner.gui.lvgl_config import _lvgl_color, top_nav as _build_top_nav
 
 
 def _serialize_button_option(option):
@@ -314,23 +298,15 @@ def _assemble_cfg(attrs):
     allow_screensaver = attrs.pop("allow_screensaver", True)
     cfg = {}
 
-    # top_nav (nested), built from whichever top-nav attrs were passed.
-    top_nav = {}
-    title = attrs.pop("title", None)
-    if title is not None:
-        top_nav["title"] = title
-    show_back_button = attrs.pop("show_back_button", None)
-    if show_back_button is not None:
-        top_nav["show_back_button"] = show_back_button
-    show_power_button = attrs.pop("show_power_button", None)
-    if show_power_button is not None:
-        top_nav["show_power_button"] = show_power_button
-    top_nav_icon_name = attrs.pop("top_nav_icon_name", None)
-    if top_nav_icon_name is not None:
-        top_nav["icon"] = top_nav_icon_name
-    icon_color = _lvgl_color(attrs.pop("top_nav_icon_color", None))
-    if icon_color is not None:
-        top_nav["icon_color"] = icon_color
+    # top_nav (nested), built from whichever top-nav attrs were passed (the builder omits
+    # unset sub-keys and color-maps the icon color).
+    top_nav = _build_top_nav(
+        title=attrs.pop("title", None),
+        show_back_button=attrs.pop("show_back_button", None),
+        show_power_button=attrs.pop("show_power_button", None),
+        icon=attrs.pop("top_nav_icon_name", None),
+        icon_color=attrs.pop("top_nav_icon_color", None),
+    )
     if top_nav:
         cfg["top_nav"] = top_nav
 
