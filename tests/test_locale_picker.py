@@ -5,9 +5,12 @@ runner wrappers) plus the LocaleSelectionView row assembly + apply behavior.
 """
 from unittest.mock import patch
 
+import pytest
+
 # base sets up the sys.modules mocks that make seedsigner importable on the host.
 from base import BaseTest
 
+from langpack_catalog import packs_available
 from seedsigner.gui.lvgl_screen_runner import (
     LOCALE_PACK_DIR,
     _assemble_cfg,
@@ -113,10 +116,48 @@ def test_discovery_wrappers_degrade_without_native_module():
 
 
 # ---------------------------------------------------------------------------
+# Init-time locale bring-up (fonts + text catalog reload)
+# ---------------------------------------------------------------------------
+
+class TestLoadActiveLocaleFonts(BaseTest):
+    def test_reloads_text_catalog_after_loading_fonts(self):
+        """ Bug B: on ESP32 the .mo catalogs live on the microSD, mounted only when the
+        native module is imported in ensure_lvgl_runtime — AFTER Settings init already
+        tried (and fail-softed) the catalog load. _load_active_locale_fonts runs
+        post-mount, so it must reload the TEXT catalog (load_locale), not just the fonts,
+        or a persisted-at-boot locale renders English. """
+        from unittest.mock import MagicMock
+        from seedsigner.gui import lvgl_screen_runner as runner
+        from seedsigner.models.settings import Settings
+        from seedsigner.models.settings_definition import SettingsConstants
+
+        mock_lv = MagicMock()
+        with patch.object(Settings, "load_locale") as mock_load_locale:
+            Settings.get_instance().set_value(
+                SettingsConstants.SETTING__LOCALE, SettingsConstants.LOCALE__SPANISH)
+            mock_load_locale.reset_mock()  # ignore the set_value-triggered reload
+
+            runner._load_active_locale_fonts(mock_lv)
+
+        # Packs discovered + the active locale's fonts loaded ...
+        mock_lv.discover_locale_packs.assert_called_once_with(runner.LOCALE_PACK_DIR)
+        mock_lv.set_locale.assert_called_once_with(
+            SettingsConstants.LOCALE__SPANISH, runner.LOCALE_PACK_DIR)
+        # ... AND the text catalog re-applied now that the card is mounted (the fix).
+        mock_load_locale.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
 # LocaleSelectionView row assembly + apply
 # ---------------------------------------------------------------------------
 
 class TestLocaleSelectionView(BaseTest):
+    # Picking row 1 needs a real non-English locale detected from a staged pack.
+    @pytest.mark.skipif(
+        not packs_available(),
+        reason="no packs staged in src/lang-packs "
+               "(build: ../seedsigner-language-packs/scripts/build_packs.sh --out-dir src/lang-packs)",
+    )
     def test_builds_rows_and_applies_selection(self):
         from seedsigner.views import settings_views
         from seedsigner.views.view import View
