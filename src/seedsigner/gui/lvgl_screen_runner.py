@@ -96,9 +96,12 @@ def ensure_lvgl_runtime():
         # in Python drives the screensaver after this.
         lv.set_screensaver_timeout(_screensaver_timeout_ms)
 
-        # Register any SD-delivered locale packs and load the active locale's font
-        # pack so the very first screen renders in the right script. Direct native
-        # calls (not the public wrappers, which would re-enter this init).
+        # Register the available language packs (the render layer bakes only the
+        # English floor and keeps no compiled-in locale table, so registering each
+        # pack's manifest is what makes any non-English locale renderable) and load
+        # the active locale's font pack so the very first screen renders in the right
+        # script. Direct native calls (not the public wrappers, which would re-enter
+        # this init).
         _load_active_locale_fonts(lv)
 
         # Publish _lv last: until it is set, other threads keep waiting on the
@@ -231,12 +234,15 @@ def _serialize_button_option(option):
     return obj
 
 
-# The locale-pack root both platforms agree on. The native locale APIs
-# (discover_locale_packs / list_available_locales / set_locale / the picker's
-# endonym-image fetch) default to "lang-packs" relative to the process CWD: on the
-# Pi the packs deploy beside the built .so, on ESP32 they live on the packs
-# partition. Kept as one constant so discovery, the picker, and set_locale all agree.
-LOCALE_PACK_DIR = "lang-packs"
+# The locale-pack root the native locale APIs (discover_locale_packs /
+# list_available_locales / set_locale / the picker's endonym-image fetch) read from —
+# the SAME self-contained packs that carry each locale's LC_MESSAGES/messages.mo. The
+# font seam (here) and the .mo seam (settings bindtextdomain + get_detected_languages)
+# MUST read the same place, so this IS SettingsConstants.get_catalog_root() (the single
+# source of truth): "lang-packs" relative to CWD on the Pi, "/sd" (microSD root) on
+# ESP32. A per-platform constant, so snapshotting it once at import is exact.
+from seedsigner.models.settings_definition import SettingsConstants as _SettingsConstants
+LOCALE_PACK_DIR = _SettingsConstants.get_catalog_root()
 
 
 # The baked "Western floor" the locale picker can render as LIVE text: ASCII +
@@ -361,9 +367,13 @@ def _assemble_cfg(attrs):
 # non-LVGL builds): the app still runs on the baked Western floor / English.
 
 def discover_locale_packs(font_dir=LOCALE_PACK_DIR):
-    """(Re)scan `font_dir` and register SD-delivered locale packs so set_locale works
-    for locales not baked into the firmware. Returns the count registered, or 0 when
-    the native runtime is absent."""
+    """(Re)scan `font_dir` and register each pack's ``manifest.json`` with the render
+    layer (``ss_register_pack_manifest``).
+
+    The render layer bakes only the English floor and keeps NO compiled-in locale table,
+    so this registration is what makes every non-English locale renderable — it must run
+    before locale activation (``set_locale``). Re-run on SD (re)insert to rescan.
+    Returns the count registered, or 0 when the native runtime is absent."""
     try:
         ensure_lvgl_runtime()
     except ImportError:

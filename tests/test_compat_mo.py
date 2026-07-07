@@ -17,11 +17,12 @@ import pytest
 
 from seedsigner.compat import _mo
 
+from langpack_catalog import resolve_catalog_root
 
-L10N_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)),
-    "src", "seedsigner", "resources", "seedsigner-translations", "l10n",
-)
+
+# The catalogs live in the staged language packs (src/lang-packs) when built, else the
+# bundled translations submodule — either way at <root>/<locale>/LC_MESSAGES/messages.mo.
+CATALOG_ROOT = resolve_catalog_root()
 
 # Every plural class in the shipped set: 1-form (ja/th), 2-form (fa, en-like), and
 # the 3/4-form Slavic + es rules with nested ternaries and && / || precedence.
@@ -29,13 +30,14 @@ ORACLE_LOCALES = ["es", "cs", "ru", "pl", "fa", "ja", "th", "de", "fr"]
 
 
 def _mo_path(locale):
-    return os.path.join(L10N_DIR, locale, "LC_MESSAGES", "messages.mo")
+    return os.path.join(CATALOG_ROOT, locale, "LC_MESSAGES", "messages.mo")
 
 
 def _require_mo(locale):
     path = _mo_path(locale)
     if not os.path.exists(path):
-        pytest.skip(f"{locale} messages.mo not compiled (run: python setup.py compile_catalog)")
+        pytest.skip(f"{locale} messages.mo not staged in src/lang-packs "
+                    "(build: ../seedsigner-language-packs/scripts/build_packs.sh --out-dir src/lang-packs)")
     return path
 
 

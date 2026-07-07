@@ -621,6 +621,10 @@ IMPORT_PATTERNS = [
      "`str.removeprefix/removesuffix` not implemented (PEP 616)"),
     (re.compile(r"\.to_bytes\s*\([^)]*\bsigned\s*="), 21,
      "`int.to_bytes(signed=...)` not supported"),
+    (re.compile(r"\bjson\.dumps?\s*\([^)]*\bindent\s*="), 21,
+     "`json.dump()/dumps()` has no `indent` kwarg on MicroPython 1.27 (raises TypeError; "
+     "in a save() the file is already truncated, so it's left empty). Gate the kwarg off "
+     "on device (e.g. `**({} if IS_MICROPYTHON else {'indent': 4})`)."),
     (re.compile(r"\.zfill\s*\("), 21,
      "`str.zfill()` not implemented (use `'{:0N}'.format(...)` / `'%0Nd' % ...` / manual pad)"),
     (re.compile(r"(?<![.\w])format\s*\("), 21,

@@ -233,25 +233,46 @@ class SettingsConstants:
 
 
     @classmethod
+    def get_catalog_root(cls):
+        """Root under which per-locale translation catalogs live, as
+        ``<root>/<locale>/LC_MESSAGES/messages.mo``.
+
+        SINGLE SOURCE OF TRUTH shared by ``get_detected_languages()`` (the picker's
+        catalog SCAN) and ``settings`` ``bindtextdomain()`` (the runtime LOOKUP), so
+        detection and lookup always point at the SAME place — otherwise a locale whose
+        ``.mo`` shipped could be missing from the picker (or vice-versa).
+
+        The catalogs live in the DEPLOYED language packs — the SAME self-contained unit
+        the fonts come from — so this matches ``LOCALE_PACK_DIR`` (the font seam's root):
+        ``"lang-packs"`` relative to CWD on the Pi (packs deploy beside the ``.so``),
+        ``"/sd"`` on ESP32 (the microSD pack root). A locale's font AND its ``.mo`` ship
+        together, so a language is fully available or not at all — no packs means English
+        only (baked floor), NEVER translated text with no font to render it (which is why
+        there is no fall-back to the app's bundled ``seedsigner-translations``: those
+        catalogs cover non-Latin languages the baked floor cannot draw).
+        """
+        from seedsigner.compat import IS_MICROPYTHON
+        if IS_MICROPYTHON:
+            return "/sd"
+        return "lang-packs"
+
+
+    @classmethod
     def get_detected_languages(cls) -> list[tuple[str, str]]:
         """
         Return a list of tuples of language codes and their native names.
 
         Scans the filesystem to autodiscover which language codes are onboard.
         """
-        # Back out from the models/ dir to reach the seedsigner package root.
-        # __file__ is .../seedsigner/models/settings_definition.py; drop the last two
-        # path segments with string ops (os.path / pathlib are absent on MicroPython).
-        seedsigner_root = __file__.rsplit("/", 2)[0]
-
         # Pre-load English since there's no "en" entry in the translations folder; also
         # it should always appear first in the list anyway.
         detected_languages = [(cls.LOCALE__ENGLISH, cls.ALL_LOCALES[cls.LOCALE__ENGLISH])]
 
-        # Autodiscover onboard locales from the fixed l10n/<locale>/LC_MESSAGES/*.mo
-        # layout. os.walk is absent on MicroPython; os.listdir exists on both, so walk
-        # the two known levels explicitly instead.
-        l10n_dir = "/".join([seedsigner_root, "resources", "seedsigner-translations", "l10n"])
+        # Autodiscover onboard locales from the fixed <root>/<locale>/LC_MESSAGES/*.mo
+        # layout (get_catalog_root() keeps this pointed at the same place as the runtime
+        # gettext lookup). os.walk is absent on MicroPython; os.listdir exists on both, so
+        # walk the two known levels explicitly instead.
+        l10n_dir = cls.get_catalog_root()
         locales_present = set()
         try:
             locale_dirs = os.listdir(l10n_dir)
