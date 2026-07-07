@@ -3,7 +3,7 @@ from seedsigner.compat import IS_MICROPYTHON
 from seedsigner.compat.l10n import gettext as _
 
 from seedsigner.helpers.l10n import mark_for_translation as _mft
-from seedsigner.gui.constants import SeedSignerIconConstants, StatusType
+from seedsigner.gui.constants import GUIConstants, SeedSignerIconConstants, StatusType
 from seedsigner.models.settings import Settings, SettingsConstants
 from seedsigner.models.settings_definition import SettingsDefinition
 from seedsigner.models.threads import BaseThread
@@ -331,19 +331,29 @@ class View:
         status_headline=None,
         text=None,
         warning_edges=None,
+        icon=None,
+        icon_color=None,
         allow_screensaver=True,
     ) -> int | str:
         """Run the native ``large_icon_status_screen``; the typed entry point for the
         status/warning/error family (see ``StatusType``).
 
-        The status_type owns the icon, so there is no icon param. ``title`` and
-        ``button_data`` default to the per-status_type value when omitted; those defaults
-        are translated HERE (still view-layer, before the screen contract). Caller-supplied
-        ``title`` / ``status_headline`` / ``text`` must already be ``_()``-wrapped; they
-        pass through untouched (NEVER re-translated)."""
-        if title is None:
+        For the four fixed types (SUCCESS/WARNING/DIRE_WARNING/ERROR) the status_type owns
+        the icon; ``title`` and ``button_data`` default to the per-status_type value when
+        omitted, translated HERE (still view-layer, before the screen contract).
+
+        ``StatusType.CUSTOM`` has no fixed icon or defaults: the caller supplies the hero
+        ``icon`` glyph (a ``SeedSignerIconConstants`` value) and its ``icon_color`` (hex),
+        plus its own ``title`` + ``button_data``. That one screen renders any large-icon
+        prompt (e.g. PSBTFinalize's SIGN icon, the remove-MicroSD warning).
+
+        Caller-supplied ``title`` / ``status_headline`` / ``text`` must already be
+        ``_()``-wrapped; they pass through untouched (NEVER re-translated)."""
+        # Per-status_type title/button defaults only exist for the four fixed types; a
+        # CUSTOM screen brings its own (the lookups are skipped rather than KeyError-ing).
+        if title is None and status_type in self._STATUS_DEFAULT_TITLE:
             title = _(self._STATUS_DEFAULT_TITLE[status_type])
-        if button_data is None:
+        if button_data is None and status_type in self._STATUS_DEFAULT_BUTTON:
             button_data = [ButtonOption(self._STATUS_DEFAULT_BUTTON[status_type])]
         return self.run_screen(
             "large_icon_status_screen",
@@ -354,6 +364,8 @@ class View:
             status_headline=status_headline,
             text=text,
             warning_edges=warning_edges,
+            icon=icon,
+            icon_color=icon_color,
             allow_screensaver=allow_screensaver,
         )
 
@@ -725,16 +737,18 @@ class RemoveMicroSDWarningView(View):
     SETTINGS = ButtonOption("Settings")
 
     def run(self):
-        from seedsigner.gui.screens.screen import WarningScreen
-
         button_data = [self.CONTINUE, self.SETTINGS]
-        selected_menu_num = self.run_screen(
-            WarningScreen,
+        # A custom large-icon status screen: the MicroSD glyph in the warning color, with
+        # the pulsing warning border (native parity with the PIL WarningScreen).
+        selected_menu_num = self.run_status_screen(
+            status_type=StatusType.CUSTOM,
+            icon=SeedSignerIconConstants.MICROSD,
+            icon_color=GUIConstants.WARNING_COLOR,
             title=_("Action Required"),
-            status_icon_name=SeedSignerIconConstants.MICROSD,
             status_headline=None,
             text=_("You must remove the\nMicroSD card to continue."),
             show_back_button=False,
+            warning_edges=True,
             button_data=button_data,
         )
 
