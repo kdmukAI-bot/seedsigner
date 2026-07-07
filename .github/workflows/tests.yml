@@ -26,8 +26,41 @@ env:
   # but the default SHA env var reflects a new commit into the target repo.
   SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
 
+  # The app is a pure reader of language packs — it neither bundles nor pins them
+  # in-tree. CI builds them here from a pinned pack-repo ref so the language test suite
+  # runs in full instead of skipping for lack of packs. Keep PACK_REF in lockstep with
+  # the seedsigner-lvgl-screens repo's PACK_REF so app, screens, and device build
+  # byte-identical packs; bump them together.
+  PACK_REPO: kdmukAI-bot/seedsigner-language-packs
+  PACK_REF: a9e39dabf60e093bb3d1494eb4728f83342c878b
+
 jobs:
+  build-language-packs:
+    # Build the runtime language packs from the pinned pack repo, inside its pinned,
+    # public GHCR toolchain image (build_packs.sh pulls it). Built once here — packs are
+    # Python-version-independent — and shared with the test matrix via an artifact, so
+    # the pack-dependent language tests actually run instead of skipping.
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout language-packs (pinned) with submodules
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PACK_REPO }}
+          ref: ${{ env.PACK_REF }}
+          # its seedsigner-translations .po source is a submodule build_packs.sh needs
+          submodules: recursive
+          path: seedsigner-language-packs
+      - name: Build language packs
+        run: seedsigner-language-packs/scripts/build_packs.sh --out-dir "$GITHUB_WORKSPACE/lang-packs"
+      - name: Upload language packs
+        uses: actions/upload-artifact@v4
+        with:
+          name: lang-packs
+          path: lang-packs
+          retention-days: 1
+
   test:
+    needs: build-language-packs
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -41,6 +74,13 @@ jobs:
         with:
           # Needs to also pull the seedsigner-translations repo
           submodules: recursive
+      - name: Download language packs
+        # The app reads packs from src/lang-packs (CWD-relative "lang-packs" root).
+        # With them present the language tests run; without, they'd skip.
+        uses: actions/download-artifact@v4
+        with:
+          name: lang-packs
+          path: src/lang-packs
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
@@ -87,3 +127,13 @@ jobs:
         # Upload also when tests fail. The workflow result (red/green) will
         # not be affected by this.
         if: always()
+
+# POSSIBLE FUTURE JOB — "no-packs run" (the other half of the screens repo's language-pack
+# CI model, docs/language-pack-production-and-delivery-notes.md §5). A job that runs the
+# suite with an EMPTY src/lang-packs (skip the pack build/download) to guard the
+# pure-reader invariant end-to-end: the pack-dependent language tests skip cleanly and the
+# English-only-without-packs tests pass, so a clean clone / a streamlined English-only build
+# stays a supported, CI-verified config. Not wired yet — the English-only behavior is already
+# exercised inside the `test` job above (the invariant tests patch the catalog root to empty),
+# so this would only add a guard that the skip-when-empty path itself never regresses to a
+# failure when no packs are present.
