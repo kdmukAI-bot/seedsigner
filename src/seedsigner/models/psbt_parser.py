@@ -79,6 +79,12 @@ class PSBTParser():
 
         self._set_root()
 
+        # 2c: per-parse cache for the cosigner change-branch node, keyed by
+        # (id(xpub), change). _get_cosigners derives xpub.child(change).child(index)
+        # per cosigner per input; the change-branch level repeats across inputs, so
+        # caching it roughly halves the CKD work in the dominant parse_inputs bucket.
+        self._ckd_cache = {}
+
         # Try to fix missing fingerprints before parsing
         self._fill_missing_fingerprints()
 
@@ -104,7 +110,7 @@ class PSBTParser():
                 self.input_amount += inp.utxo.value
                 script_pubkey = inp.script_pubkey
 
-            inp_policy = PSBTParser._get_policy(inp, script_pubkey, self.psbt.xpubs)
+            inp_policy = self._get_policy(inp, script_pubkey, self.psbt.xpubs, self._ckd_cache)
             if self.policy == None:
                 self.policy = inp_policy
             else:
@@ -118,8 +124,13 @@ class PSBTParser():
         self.fee_amount = 0
         self.destination_addresses = []
         self.destination_amounts = []
+        # 2a: PSBT.tx is a property that rebuilds the entire Transaction on EVERY
+        # access (embit/psbt.py); read it once for the whole loop rather than the
+        # ~12 rebuilds the per-vout references below would otherwise trigger.
+        tx = self.psbt.tx
+        vout = tx.vout
         for i, out in enumerate(self.psbt.outputs):
-            out_policy = PSBTParser._get_policy(out, self.psbt.tx.vout[i].script_pubkey, self.psbt.xpubs)
+            out_policy = self._get_policy(out, vout[i].script_pubkey, self.psbt.xpubs, self._ckd_cache)
             is_change = False
 
             # if policy is the same - probably change
@@ -167,7 +178,7 @@ class PSBTParser():
                     elif self.policy["type"] == "p2wpkh" and my_pubkey is not None:
                         sc = script.p2wpkh(my_pubkey)
 
-                    if sc.data == self.psbt.tx.vout[i].script_pubkey.data:
+                    if sc.data == vout[i].script_pubkey.data:
                         is_change = True
 
                 elif "p2tr" in self.policy["type"]:
@@ -180,18 +191,18 @@ class PSBTParser():
                         my_pubkey = self.root.derive(der)
                         sc = script.p2tr(my_pubkey)
 
-                    if sc.data == self.psbt.tx.vout[i].script_pubkey.data:
+                    if sc.data == vout[i].script_pubkey.data:
                         is_change = True
 
-                if sc.data == self.psbt.tx.vout[i].script_pubkey.data:
+                if sc.data == vout[i].script_pubkey.data:
                     is_change = True
 
-            if self.psbt.tx.vout[i].script_pubkey.data[0] == OPCODES.OP_RETURN:
+            if vout[i].script_pubkey.data[0] == OPCODES.OP_RETURN:
                 # The data is written as: OP_RETURN + OP_PUSHDATA1 + len(payload) + payload
-                self.op_return_data = self.psbt.tx.vout[i].script_pubkey.data[3:]
+                self.op_return_data = vout[i].script_pubkey.data[3:]
 
             elif is_change:
-                addr = self.psbt.tx.vout[i].script_pubkey.address(NETWORKS[SettingsConstants.map_network_to_embit(self.network)])
+                addr = vout[i].script_pubkey.address(NETWORKS[SettingsConstants.map_network_to_embit(self.network)])
                 fingerprints = []
                 derivation_paths = []
 
@@ -210,17 +221,17 @@ class PSBTParser():
                 self.change_data.append({
                     "output_index": i,
                     "address": addr,
-                    "amount": self.psbt.tx.vout[i].value,
+                    "amount": vout[i].value,
                     "fingerprint": fingerprints,
                     "derivation_path": derivation_paths,
                 })
-                self.change_amount += self.psbt.tx.vout[i].value
+                self.change_amount += vout[i].value
 
             else:
-                addr = self.psbt.tx.vout[i].script_pubkey.address(NETWORKS[SettingsConstants.map_network_to_embit(self.network)])
+                addr = vout[i].script_pubkey.address(NETWORKS[SettingsConstants.map_network_to_embit(self.network)])
                 self.destination_addresses.append(addr)
-                self.destination_amounts.append(self.psbt.tx.vout[i].value)
-                self.spend_amount += self.psbt.tx.vout[i].value
+                self.destination_amounts.append(vout[i].value)
+                self.spend_amount += vout[i].value
 
         self.fee_amount = self.psbt.fee()
         return True
@@ -255,7 +266,7 @@ class PSBTParser():
 
 
     @staticmethod
-    def _get_policy(scope, scriptpubkey, xpubs):
+    def _get_policy(scope, scriptpubkey, xpubs, ckd_cache=None):
         """Parse scope and get policy"""
         # we don't know the policy yet, let's parse it
         script_type = scriptpubkey.script_type()
@@ -285,7 +296,7 @@ class PSBTParser():
             
                 # check pubkeys are derived from cosigners
                 try:
-                    cosigners = PSBTParser._get_cosigners(pubkeys, scope.bip32_derivations, xpubs)
+                    cosigners = PSBTParser._get_cosigners(pubkeys, scope.bip32_derivations, xpubs, ckd_cache)
                     policy.update({"m": m, "n": n, "cosigners": cosigners})
                 except:
                     policy.update({"m": m, "n": n})
@@ -323,7 +334,7 @@ class PSBTParser():
 
 
     @staticmethod
-    def _get_cosigners(pubkeys, derivations, xpubs):
+    def _get_cosigners(pubkeys, derivations, xpubs, ckd_cache=None):
         """Returns xpubs used to derive pubkeys using global xpub field from psbt"""
         cosigners = []
         for i, pubkey in enumerate(pubkeys):
@@ -337,7 +348,22 @@ class PSBTParser():
                     # check derivation - last two indexes give pub from xpub
                     if origin_der.derivation == der.derivation[:-2]:
                         # check that it derives to pubkey actually
-                        if xpub.derive(der.derivation[-2:]).key == pubkey:
+                        # 2c: xpub.derive([change, index]) == xpub.child(change).child(index).
+                        # The change-branch level depends only on (xpub, change) and repeats
+                        # across every input, so memoize it per parse (byte-identical: child()
+                        # is deterministic and non-mutating). Falls back to the plain derive
+                        # for non-2-element tails or when no cache is threaded.
+                        tail = der.derivation[-2:]
+                        if ckd_cache is not None and len(tail) == 2:
+                            branch_key = (id(xpub), tail[0])
+                            branch = ckd_cache.get(branch_key)
+                            if branch is None:
+                                branch = xpub.child(tail[0])
+                                ckd_cache[branch_key] = branch
+                            derived = branch.child(tail[1])
+                        else:
+                            derived = xpub.derive(tail)
+                        if derived.key == pubkey:
                             # append strings so they can be sorted and compared
                             cosigners.append(xpub.to_base58())
                             break
@@ -413,7 +439,7 @@ class PSBTParser():
         i = change_data["output_index"]
         output = self.psbt.outputs[i]
         is_owner = descriptor.owns(output)
-        # print(f"{self.psbt.tx.vout[i].script_pubkey.address()} | {output.value} | {is_owner}")
+        # print(f"{vout[i].script_pubkey.address()} | {output.value} | {is_owner}")
         return is_owner
 
 
@@ -430,11 +456,18 @@ class PSBTParser():
         """
         if not self.root:
             return 0
-        
+
+        # 2b: the signing seed's master fingerprint is seed-constant. The original
+        # code recomputed self.root.child(0).fingerprint — a full private CKD —
+        # inside _fill_scope, once per input AND per output (100% waste on any PSBT
+        # with no missing all-zero fingerprints). child(0).fingerprint is
+        # hash160(root.sec())[:4], which is exactly self.root.my_fingerprint (a
+        # cached hash160, CKD-free) — so hoisting it here is byte-identical.
+        signing_seed_fingerprint = self.root.my_fingerprint
+
         def _fill_scope(scope: InputScope | OutputScope):
             """Helper function to fill missing fingerprints in a scope (input/output)"""
-            signing_seed_fingerprint = self.root.child(0).fingerprint
-            
+
             # Helper function to check and fix fingerprint
             def _get_updated_fingerprint(public_key: PublicKey, derivation_path_obj: DerivationPath) -> DerivationPath | None:
                 if derivation_path_obj.fingerprint != b"\x00\x00\x00\x00":
