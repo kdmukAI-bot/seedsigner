@@ -351,32 +351,38 @@ class SeedAddPassphraseView(View):
     """
     def __init__(self, initial_keyboard: str = None):
         super().__init__()
-        if initial_keyboard is None:
-            # Resolved lazily so this module stays import-time free of the PIL-backed
-            # seed_screens; KEYBOARD__LOWERCASE_BUTTON_TEXT is just a str constant.
-            from seedsigner.gui.screens.seed_screens import SeedAddPassphraseScreen
-            initial_keyboard = SeedAddPassphraseScreen.KEYBOARD__LOWERCASE_BUTTON_TEXT
+        # initial_keyboard is only set by the screenshot generator to preselect a keyboard
+        # layout; real flows leave it None (the native screen defaults to lowercase). Kept as
+        # a plain str so this module stays free of the PIL-backed seed_screens import.
         self.initial_keyboard = initial_keyboard
         self.seed = self.controller.storage.get_pending_seed()
 
 
     def run(self):
-        from seedsigner.gui.screens import seed_screens
-
-        passphrase_title=self.seed.passphrase_label
-        ret_dict = self.run_screen(
-            seed_screens.SeedAddPassphraseScreen,
-            passphrase=self.seed.passphrase,
-            title=passphrase_title,
-            initial_keyboard=self.initial_keyboard,
+        # Native passphrase-entry screen (on-screen keyboard). Confirm returns the entered
+        # string via the text_entered event; back returns RET_CODE__BACK_BUTTON (no text).
+        # The screenshot generator's KEYBOARD__*_BUTTON_TEXT ids map to the native initial
+        # keyboard mode; real flows leave initial_keyboard None (native default: lowercase).
+        native_keyboard_mode = {"ABC": "upper", "123": "digits", "!@#": "symbols", "*[]": "symbols"}
+        ret = self.run_screen(
+            "seed_add_passphrase_screen",
+            # The native screen titles itself "BIP-39 Passphrase" (parity with the PIL screen,
+            # which hardcoded this and ignored the passed label).
+            title=_("BIP-39 Passphrase"),
+            initial_text=self.seed.passphrase,
+            initial_mode=native_keyboard_mode.get(self.initial_keyboard),
         )
 
-        # The new passphrase will be the return value; it might be empty.
-        self.seed.set_passphrase(ret_dict["passphrase"])
-
-        if "is_back_button" in ret_dict or len(self.seed.passphrase) == 0:
+        if ret == RET_CODE__BACK_BUTTON:
+            # Backed out of entry (no text returned): keep the seed's existing passphrase and
+            # offer edit / skip (fresh entry) or edit / discard (an in-progress edit).
             return Destination(SeedAddPassphraseExitDialogView)
-                    
+
+        # Otherwise `ret` is the confirmed passphrase string; it might be empty.
+        self.seed.set_passphrase(ret)
+
+        if len(self.seed.passphrase) == 0:
+            return Destination(SeedAddPassphraseExitDialogView)
         else:
             return Destination(SeedReviewPassphraseView)
 
