@@ -432,8 +432,6 @@ class SeedReviewPassphraseView(View):
 
     def run(self):
         # Get the before/after fingerprints
-        from seedsigner.gui.screens import seed_screens
-
         network = self.settings.get_value(SettingsConstants.SETTING__NETWORK)
         passphrase = self.seed.passphrase
         fingerprint_with = self.seed.get_fingerprint(network=network)
@@ -445,11 +443,17 @@ class SeedReviewPassphraseView(View):
 
         # Because we have an explicit "Edit" button, we disable "BACK" to keep the
         # routing options sane.
+        # Native review-passphrase screen (passphrase read-out with hidden-space reveal +
+        # a fingerprint-change line). The screen owns the wrap/reveal; the View supplies the
+        # passphrase, before/after fingerprints, and the localized title + label + buttons.
         selected_menu_num = self.run_screen(
-            seed_screens.SeedReviewPassphraseScreen,
+            "seed_review_passphrase_screen",
+            title=_("Verify Passphrase"),
             fingerprint_without=fingerprint_without,
             fingerprint_with=fingerprint_with,
             passphrase=self.seed.passphrase,
+            # TRANSLATOR_NOTE: Describes the effect of applying a BIP-39 passphrase; it changes the seed's fingerprint
+            changes_fingerprint_label=_("changes fingerprint"),
             button_data=button_data,
             show_back_button=False,
         )
@@ -911,8 +915,6 @@ class SeedExportXpubDetailsView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens import seed_screens
-
         seed_derivation_override = self.seed.derivation_override(self.sig_type)
         if self.script_type == SettingsConstants.CUSTOM_DERIVATION:
             derivation_path = self.custom_derivation
@@ -953,11 +955,21 @@ class SeedExportXpubDetailsView(View):
             xpub = xprv.to_public()
             xpub_base58 = xpub.to_string(version=version)
 
+            # Native xpub-details screen (fingerprint / derivation / truncated-xpub read-outs
+            # + warning edges). The screen owns the layout/truncation; the View supplies the
+            # values plus the localized title, field labels, and export button.
             selected_menu_num = self.run_screen(
-                seed_screens.SeedExportXpubDetailsScreen,
+                "seed_export_xpub_details_screen",
+                title=_("Xpub Details"),
                 fingerprint=fingerprint,
                 derivation_path=derivation_path,
                 xpub=xpub_base58,
+                # TRANSLATOR_NOTE: Short for "BIP-32 Master Fingerprint"
+                fingerprint_label=_("Fingerprint"),
+                # TRANSLATOR_NOTE: Short for "Derivation Path"
+                derivation_label=_("Derivation"),
+                xpub_label=_("Xpub"),
+                button_data=[ButtonOption("Export xpub")],
             )
 
         if selected_menu_num == 0:
@@ -1064,8 +1076,6 @@ class SeedWordsView(View):
 
     def run(self):
         # Slice the mnemonic to our current 4-word section
-        from seedsigner.gui.screens import seed_screens
-
         words_per_page = 4  # TODO: eventually make this configurable for bigger screens?
 
         if self.bip85_data is not None:
@@ -1084,8 +1094,11 @@ class SeedWordsView(View):
         else:
             button_data.append(self.DONE)
 
+        # Native seed-words screen (numbered word chips + dire-warning edges). The screen
+        # owns the layout/edges and forces is_bottom_list; the View supplies the localized
+        # paged title, this page's words, and the paging counters.
         selected_menu_num = self.run_screen(
-            seed_screens.SeedWordsScreen,
+            "seed_words_screen",
             title=f"{title}: {self.page_index+1}/{num_pages}",
             words=words,
             page_index=self.page_index,

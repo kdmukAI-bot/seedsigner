@@ -33,6 +33,28 @@ class TestSeedFlows(FlowTest):
         ])
 
 
+    def test_view_seed_words_flow(self):
+        """
+            Viewing a seed's words is driven by the native seed_words_screen. Paging forward
+            via NEXT walks page-by-page; DONE on the final page lands on the backup-test
+            prompt (A1 LVGL screen swap).
+        """
+        # Load a finalized 12-word Seed (3 pages of 4 words) as seed_num=0
+        mnemonic = "blush twice taste dawn feed second opinion lazy thumb play neglect impact".split()
+        self.controller.storage.set_pending_seed(Seed(mnemonic=mnemonic))
+        self.controller.storage.finalize_pending_seed()
+
+        self.run_sequence(
+            initial_destination_view_args=dict(seed_num=0),
+            sequence=[
+                FlowStep(seed_views.SeedWordsView, button_data_selection=seed_views.SeedWordsView.NEXT),  # page 1/3
+                FlowStep(seed_views.SeedWordsView, button_data_selection=seed_views.SeedWordsView.NEXT),  # page 2/3
+                FlowStep(seed_views.SeedWordsView, button_data_selection=seed_views.SeedWordsView.DONE),  # page 3/3
+                FlowStep(seed_views.SeedWordsBackupTestPromptView),
+            ],
+        )
+
+
     def test_passphrase_entry_flow(self):
         """
         Opting to add a BIP-39 passphrase on the Finalize Seed screen should enter the
