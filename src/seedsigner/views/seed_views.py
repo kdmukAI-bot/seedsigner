@@ -1554,22 +1554,30 @@ class SeedTranscribeSeedQRWholeQRView(View):
     
 
     def run(self):
-        from seedsigner.gui.screens import seed_screens
+        from seedsigner.models.encode_qr import CompactSeedQrEncoder, SeedQrEncoder
 
         encoder_args = dict(mnemonic=self.seed.mnemonic_list,
                             wordlist_language_code=self.settings.get_value(SettingsConstants.SETTING__WORDLIST_LANGUAGE))
-        from seedsigner.models.encode_qr import CompactSeedQrEncoder, SeedQrEncoder
-        if self.seedqr_format == QRType.SEED__SEEDQR:
-            e = SeedQrEncoder(**encoder_args)
-        elif self.seedqr_format == QRType.SEED__COMPACTSEEDQR:
+        if self.seedqr_format == QRType.SEED__COMPACTSEEDQR:
+            # CompactSeedQR is raw bytes in byte mode; hex-serialize for the JSON cfg.
             e = CompactSeedQrEncoder(**encoder_args)
+            qr_mode, data_encoding = "byte", "hex"
+            qr_data = hexlify(bytes(e.next_part())).decode()
+        else:
+            # Standard SeedQR is an all-numeric digit string.
+            e = SeedQrEncoder(**encoder_args)
+            qr_mode, data_encoding = "numeric", "utf8"
+            qr_data = e.next_part()
 
-        data = e.next_part()
-
+        # Native whole-QR transcribe screen (direct-drawn full grid + dire-warning edges). The
+        # screen derives the module count for rendering; the View supplies the localized
+        # "Begin NxN" button from its own num_modules.
         ret = self.run_screen(
-            seed_screens.SeedTranscribeSeedQRWholeQRScreen,
-            qr_data=data,
-            num_modules=self.num_modules,
+            "seed_transcribe_whole_qr_screen",
+            qr_data=qr_data,
+            qr_mode=qr_mode,
+            data_encoding=data_encoding,
+            button_data=[ButtonOption(_("Begin {}x{}").format(self.num_modules, self.num_modules))],
         )
 
         if ret == RET_CODE__BACK_BUTTON:
@@ -2113,8 +2121,6 @@ class MultisigWalletDescriptorView(View):
     OK = ButtonOption("OK")
 
     def run(self):
-        from seedsigner.gui.screens import seed_screens
-
         descriptor = self.controller.multisig_wallet_descriptor
 
         fingerprints = []
@@ -2139,9 +2145,13 @@ class MultisigWalletDescriptorView(View):
                 button_data = [self.ADDRESS_EXPLORER]
 
         selected_menu_num = self.run_screen(
-            seed_screens.MultisigWalletDescriptorScreen,
+            "multisig_wallet_descriptor_screen",
+            title=_("Descriptor Loaded"),
             policy=policy,
             fingerprints=fingerprints,
+            # TRANSLATOR_NOTE: Label for the multisig wallet's signing policy (e.g. 2-of-3)
+            policy_label=_("Policy"),
+            signing_keys_label=_("Signing Keys"),
             button_data=button_data,
         )
 
@@ -2287,10 +2297,12 @@ class SeedSignMessageConfirmAddressView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.seed_screens import SeedSignMessageConfirmAddressScreen
         selected_menu_num = self.run_screen(
-            SeedSignMessageConfirmAddressScreen,
+            "seed_sign_message_confirm_address_screen",
+            title=_("Confirm Address"),
             derivation_path=self.derivation_path,
+            # TRANSLATOR_NOTE: Small gray label above the derivation path value
+            derivation_path_label=_("derivation path"),
             address=self.address,
         )
 
