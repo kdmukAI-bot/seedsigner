@@ -449,8 +449,7 @@ class TestSeedFlows(FlowTest):
         )
 
 
-    @patch("seedsigner.gui.screens.seed_screens.SeedTranscribeSeedQRZoomedInScreen", autospec=True)
-    def test_transcribe_seedqr_and_verify(self, mock_zoomed_in_screen: Callable):
+    def test_transcribe_seedqr_and_verify(self):
         """
         """
         # Load a finalized Seed into the Controller
