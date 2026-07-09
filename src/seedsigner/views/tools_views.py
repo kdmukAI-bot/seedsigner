@@ -480,20 +480,28 @@ class ToolsCalcFinalWordShowFinalWordView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.tools_screens import ToolsCalcFinalWordScreen
         button_data = [self.NEXT]
 
         # TRANSLATOR_NOTE: label to calculate the last word of a BIP-39 mnemonic seed phrase
         title = _("Final Word Calc")
 
+        # The native screen takes pre-formatted, localized caption strings + a flag for whether
+        # a word was selected (vs coin flips); it renders the bit-math from selected_final_bits +
+        # checksum_bits itself.
+        selection_text = self.selected_final_word if self.selected_final_word else self.selected_final_bits
         selected_menu_num = self.run_screen(
-            ToolsCalcFinalWordScreen,
+            "tools_calc_final_word_screen",
             title=title,
             button_data=button_data,
-            selected_final_word=self.selected_final_word,
+            # TRANSLATOR_NOTE: The additional entropy the user supplied (e.g. coin flips)
+            your_input_text=_('Your input: "{}"').format(selection_text),
+            # TRANSLATOR_NOTE: The computed final word of the BIP-39 mnemonic
+            final_word_text=_('Final Word: "{}"').format(self.actual_final_word),
+            has_selected_word=bool(self.selected_final_word),
             selected_final_bits=self.selected_final_bits,
             checksum_bits=self.checksum_bits,
-            actual_final_word=self.actual_final_word,
+            # TRANSLATOR_NOTE: Label for the BIP-39 mnemonic checksum bits
+            checksum_label=_("Checksum"),
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
@@ -509,7 +517,6 @@ class ToolsCalcFinalWordDoneView(View):
     DISCARD = ButtonOption("Discard", button_label_color="red")
 
     def run(self):
-        from seedsigner.gui.screens.tools_screens import ToolsCalcFinalWordDoneScreen
         from seedsigner.views.seed_views import SeedDiscardView, SeedFinalizeView
         mnemonic = self.controller.storage.pending_mnemonic
         mnemonic_word_length = len(mnemonic)
@@ -518,10 +525,13 @@ class ToolsCalcFinalWordDoneView(View):
         button_data = [self.LOAD, self.DISCARD]
 
         selected_menu_num = self.run_screen(
-            ToolsCalcFinalWordDoneScreen,
+            "tools_calc_final_word_done_screen",
+            # The native screen derives the title from the word length; pass the localized ordinal.
+            title=_("12th Word") if mnemonic_word_length == 12 else _("24th Word"),
             final_word=final_word,
-            mnemonic_word_length=mnemonic_word_length,
             fingerprint=self.controller.storage.get_pending_mnemonic_fingerprint(self.settings.get_value(SettingsConstants.SETTING__NETWORK)),
+            # TRANSLATOR_NOTE: Label above the seed's master fingerprint value
+            fingerprint_label=_("fingerprint"),
             button_data=button_data,
         )
 
