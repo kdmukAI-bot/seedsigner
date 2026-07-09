@@ -715,17 +715,14 @@ class ToolsAddressExplorerAddressTypeView(View):
 
 
 class ToolsAddressExplorerAddressListView(View):
-    def __init__(self, is_change: bool = False, start_index: int = 0, selected_button_index: int = 0, initial_scroll: int = 0):
+    def __init__(self, is_change: bool = False, start_index: int = 0, selected_button_index: int = 0):
         super().__init__()
         self.is_change = is_change
         self.start_index = start_index
         self.selected_button_index = selected_button_index
-        self.initial_scroll = initial_scroll
 
 
     def run(self):
-        from seedsigner.gui.screens.tools_screens import ToolsAddressExplorerAddressListScreen
-
         addresses = []
         button_data = []
         data = self.controller.address_explorer_data
@@ -774,11 +771,13 @@ class ToolsAddressExplorerAddressListView(View):
                     raise Exception(_("Single sig descriptors not yet supported"))
 
         selected_menu_num = self.run_screen(
-            ToolsAddressExplorerAddressListScreen,
+            "tools_address_explorer_address_list_screen",
             title=_("Receive Addrs") if not self.is_change else _("Change Addrs"),
             start_index=self.start_index,
             addresses=addresses,
             selected_button=self.selected_button_index,
+            # TRANSLATOR_NOTE: Insert the number of addrs displayed per screen (e.g. "Next 10")
+            next_label=_("Next {}").format(len(addresses)),
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
@@ -788,23 +787,21 @@ class ToolsAddressExplorerAddressListView(View):
             # User clicked NEXT
             return Destination(ToolsAddressExplorerAddressListView, view_args=dict(is_change=self.is_change, start_index=self.start_index + addrs_per_screen))
         
-        # Preserve the list's current scroll so we can return to the same spot
-        initial_scroll = self.screen.buttons[0].scroll_y
-
+        # The list resumes on return via the selected row (native initial_selected_index),
+        # so there's no pixel scroll position to preserve.
         index = selected_menu_num + self.start_index
-        return Destination(ToolsAddressExplorerAddressView, view_args=dict(index=index, address=addresses[selected_menu_num], is_change=self.is_change, start_index=self.start_index, parent_initial_scroll=initial_scroll), skip_current_view=True)
+        return Destination(ToolsAddressExplorerAddressView, view_args=dict(index=index, address=addresses[selected_menu_num], is_change=self.is_change, start_index=self.start_index), skip_current_view=True)
 
 
 
 class ToolsAddressExplorerAddressView(View):
     # TODO: pull address str from controller.address_explorer_data and pass addr_storage_key and addr_index instead
-    def __init__(self, index: int, address: str, is_change: bool, start_index: int, parent_initial_scroll: int = 0):
+    def __init__(self, index: int, address: str, is_change: bool, start_index: int):
         super().__init__()
         self.index = index
         self.address = address
         self.is_change = is_change
         self.start_index = start_index
-        self.parent_initial_scroll = parent_initial_scroll
 
     
     def run(self):
@@ -814,4 +811,4 @@ class ToolsAddressExplorerAddressView(View):
         self.run_qr_display_screen(qr_encoder=qr_encoder)
     
         # Exiting/Cancelling the QR display screen always returns to the list
-        return Destination(ToolsAddressExplorerAddressListView, view_args=dict(is_change=self.is_change, start_index=self.start_index, selected_button_index=self.index - self.start_index, initial_scroll=self.parent_initial_scroll), skip_current_view=True)
+        return Destination(ToolsAddressExplorerAddressListView, view_args=dict(is_change=self.is_change, start_index=self.start_index, selected_button_index=self.index - self.start_index), skip_current_view=True)
