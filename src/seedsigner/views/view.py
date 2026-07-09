@@ -285,7 +285,7 @@ class View:
         rows,
         show_back_button=True,
     ) -> int:
-        """Run the native ``locale_picker_screen`` (language selection); the typed
+        """Run the native ``settings_locale_picker_screen`` (language selection); the typed
         entry point for :class:`LocaleSelectionView`.
 
         ``rows`` is a list of ``{"code", "english", "native"}`` dicts in display order.
@@ -295,7 +295,7 @@ class View:
         or ``RET_CODE__BACK_BUTTON``.
         """
         return self.run_screen(
-            "locale_picker_screen",
+            "settings_locale_picker_screen",
             title=title,
             show_back_button=show_back_button,
             active_locale=active_locale,
@@ -790,7 +790,7 @@ class OpeningSplashView(View):
         # The native screen owns the logo + partner (HRF) assets and the durations; the
         # View supplies only the localized text + the two booleans.
         self.run_screen(
-            "splash_screen",
+            "opening_splash_screen",
             version=f"v{self.controller.VERSION}",
             show_partner_logos=show_partner_logos,
             # TRANSLATOR_NOTE: This is on the opening splash screen, displayed above the HRF logo

@@ -176,7 +176,7 @@ class TestLocaleSelectionView(BaseTest):
              patch("seedsigner.gui.lvgl_screen_runner.set_locale_fonts") as mock_fonts:
             dest = settings_views.LocaleSelectionView().run()
 
-        assert captured["screen"] == "locale_picker_screen"
+        assert captured["screen"] == "settings_locale_picker_screen"
         rows = captured["rows"]
         # English is always the first row; the current locale is handed to the picker.
         assert rows[0]["code"] == SettingsConstants.LOCALE__ENGLISH
