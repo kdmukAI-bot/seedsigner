@@ -60,25 +60,32 @@ class TestSeedFlows(FlowTest):
         Opting to add a BIP-39 passphrase on the Finalize Seed screen should enter the
         passphrase entry / review flow and end at the SeedOptionsView. 
         """
-        # The native seed_add_passphrase_screen returns the entered string on confirm, or
-        # RET_CODE__BACK_BUTTON on back (no in-progress text). So a back-out routes to the
-        # exit dialog against the seed's *existing* passphrase: Skip when empty, Discard when set.
+        # Passphrase-flow contract: Back returns to where you came from with no changes applied
+        # (Finalize for an initial add, Review for an edit); only an *empty submit* opens the exit
+        # dialog, which reads the seed's (untouched) passphrase to offer Skip (none set) vs Discard
+        # (one set).
         self.run_sequence([
             FlowStep(MainMenuView, button_data_selection=MainMenuView.SCAN),
             FlowStep(scan_views.ScanView, before_run=load_seed_into_decoder),  # simulate read SeedQR; ret val is ignored
             FlowStep(seed_views.SeedFinalizeView, button_data_selection=seed_views.SeedFinalizeView.PASSPHRASE),
-            # Back out of a fresh (empty) entry -> "Skip passphrase?" -> SKIP returns to Finalize
+            # Back out of a fresh entry -> return to Finalize (no dialog, no changes)
             FlowStep(seed_views.SeedAddPassphraseView, screen_return_value=RET_CODE__BACK_BUTTON),
+            FlowStep(seed_views.SeedFinalizeView, button_data_selection=seed_views.SeedFinalizeView.PASSPHRASE),
+            # Submit an empty passphrase with none set -> "Skip?" dialog -> SKIP returns to Finalize
+            FlowStep(seed_views.SeedAddPassphraseView, screen_return_value=""),
             FlowStep(seed_views.SeedAddPassphraseExitDialogView, button_data_selection=seed_views.SeedAddPassphraseExitDialogView.SKIP),
             FlowStep(seed_views.SeedFinalizeView, button_data_selection=seed_views.SeedFinalizeView.PASSPHRASE),
-            # Confirm a passphrase -> Review; Edit re-enters the entry screen
+            # Submit a passphrase -> Review; Edit re-enters the entry screen
             FlowStep(seed_views.SeedAddPassphraseView, screen_return_value="muhpassphrase"),
             FlowStep(seed_views.SeedReviewPassphraseView, button_data_selection=seed_views.SeedReviewPassphraseView.EDIT),
-            # Back out with a passphrase already set -> "Discard passphrase?" -> DISCARD to Finalize
+            # Editing, back out -> return to Review with the passphrase intact
             FlowStep(seed_views.SeedAddPassphraseView, screen_return_value=RET_CODE__BACK_BUTTON),
+            FlowStep(seed_views.SeedReviewPassphraseView, button_data_selection=seed_views.SeedReviewPassphraseView.EDIT),
+            # Editing, clear + submit empty with one set -> "Discard?" dialog -> DISCARD to Finalize
+            FlowStep(seed_views.SeedAddPassphraseView, screen_return_value=""),
             FlowStep(seed_views.SeedAddPassphraseExitDialogView, button_data_selection=seed_views.SeedAddPassphraseExitDialogView.DISCARD),
             FlowStep(seed_views.SeedFinalizeView, button_data_selection=seed_views.SeedFinalizeView.PASSPHRASE),
-            # Confirm again -> Review -> Done
+            # Submit a passphrase and finish
             FlowStep(seed_views.SeedAddPassphraseView, screen_return_value="muhpassphrase"),
             FlowStep(seed_views.SeedReviewPassphraseView, button_data_selection=seed_views.SeedReviewPassphraseView.DONE),
             FlowStep(seed_views.SeedOptionsView),
