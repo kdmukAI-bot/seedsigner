@@ -881,3 +881,62 @@ def run_image_entropy_screen(*, seed_hash=None, allow_screensaver=False):
     finally:
         if not allow_screensaver:
             _lv.set_screensaver_timeout(_screensaver_timeout_ms)
+
+
+def run_seed_address_verification_screen(*, address, type_network, network, title,
+                                         skip_label, cancel_label,
+                                         threadsafe_counter, verified_index,
+                                         allow_screensaver=False):
+    """Drive the native seed_address_verification_screen (MicroPython / ESP32).
+
+    The native screen is a static address / type-network readout plus a live "Checking address
+    N" progress line pushed via ``seed_address_verification_set_progress()``. The host owns the
+    brute-force worker + match logic (the caller's ``threadsafe_counter`` / ``verified_index``);
+    this loop only reflects them: build the screen once, then poll for Skip 10 / Cancel while
+    pushing the progress line and watching ``verified_index`` for a match. Skip 10 bumps the
+    worker's counter and keeps scanning; Cancel gives up. Returns True when the worker matched
+    the address, False on Cancel. Mirrors ``run_qr_display_screen`` (build-and-return + a Python
+    poll loop); the native screen forces show_back_button off, so the only buttons are Skip 10
+    (index 0) and Cancel (index 1)."""
+    ensure_lvgl_runtime()
+    import time
+    from seedsigner.compat.l10n import gettext as _
+
+    def _progress_text():
+        # TRANSLATOR_NOTE: Inserts the nth address number (e.g. "Checking address 7")
+        return _("Checking address {}").format(threadsafe_counter.cur_count)
+
+    cfg = {
+        "top_nav": {"title": title},
+        "address": address,
+        "type_network": type_network,
+        "network": network,
+        "button_list": [skip_label, cancel_label],
+        "progress_text": _progress_text(),
+        "allow_screensaver": allow_screensaver,
+    }
+
+    # A scan-in-progress is not LVGL "input activity", so suspend the idle screensaver for the
+    # screen's duration (mirrors run_qr_display_screen / run_scan_screen), then restore.
+    if not allow_screensaver:
+        _lv.set_screensaver_timeout(0)
+    try:
+        _lv.clear_result_queue()
+        _lv.seed_address_verification_screen(cfg)
+        while True:
+            event = _lv.poll_for_result()
+            if event is not None:
+                result = _translate_event(event)
+                if result == 0:
+                    # Skip 10: jump the worker ahead and keep scanning.
+                    threadsafe_counter.increment(10)
+                    continue
+                # Cancel (index 1): give up.
+                return False
+            if verified_index.cur_count is not None:
+                return True
+            _lv.seed_address_verification_set_progress(_progress_text())
+            time.sleep_ms(100)
+    finally:
+        if not allow_screensaver:
+            _lv.set_screensaver_timeout(_screensaver_timeout_ms)
