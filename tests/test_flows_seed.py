@@ -640,17 +640,6 @@ class TestMessageSigningFlows(FlowTest):
         self.load_signmessage_into_decoder(view, self.CUSTOM_DERIVATION_PATH, self.SHORT_MESSAGE)
 
 
-    def inject_mesage_as_paged_message(self, view: View):
-        # Because the Screen won't actually run, we have to do the Screen's work here
-        from seedsigner.gui.components import reflow_text_into_pages, GUIConstants
-        paged = reflow_text_into_pages(
-            text=self.controller.sign_message_data["message"],
-            width=240 - 2*GUIConstants.EDGE_PADDING,
-            height=240 - GUIConstants.TOP_NAV_HEIGHT - 3*GUIConstants.EDGE_PADDING - GUIConstants.BUTTON_HEIGHT,
-        )
-        self.controller.sign_message_data["paged_message"] = paged
-
-
     def test_sign_message_flow(self):
         """
         Should scan a `signmessage` QR and complete the message review, address review,
@@ -668,7 +657,7 @@ class TestMessageSigningFlows(FlowTest):
             FlowStep(scan_views.ScanView, before_run=self.load_seed_into_decoder),  # simulate read SeedQR; ret val is ignored
             FlowStep(seed_views.SeedFinalizeView, button_data_selection=seed_views.SeedFinalizeView.FINALIZE),
             FlowStep(seed_views.SeedOptionsView, is_redirect=True),
-            FlowStep(seed_views.SeedSignMessageConfirmMessageView, before_run=self.inject_mesage_as_paged_message, screen_return_value=0),
+            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=0),
             FlowStep(seed_views.SeedSignMessageConfirmAddressView, screen_return_value=0),
             FlowStep(seed_views.SeedSignMessageSignedMessageQRView, screen_return_value=0),
             FlowStep(MainMenuView),
@@ -683,7 +672,7 @@ class TestMessageSigningFlows(FlowTest):
             FlowStep(seed_views.SeedOptionsView, button_data_selection=seed_views.SeedOptionsView.SIGN_MESSAGE),
             FlowStep(scan_views.ScanView, before_run=self.load_short_message_into_decoder),  # simulate read message QR; ret val is ignored
             FlowStep(seed_views.SeedSignMessageStartView, is_redirect=True),
-            FlowStep(seed_views.SeedSignMessageConfirmMessageView, before_run=self.inject_mesage_as_paged_message, screen_return_value=0),
+            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=0),
             FlowStep(seed_views.SeedSignMessageConfirmAddressView, screen_return_value=0),
             FlowStep(seed_views.SeedSignMessageSignedMessageQRView, screen_return_value=0),
             FlowStep(MainMenuView),
@@ -698,25 +687,11 @@ class TestMessageSigningFlows(FlowTest):
             FlowStep(scan_views.ScanView, before_run=self.load_seed_into_decoder),  # simulate read SeedQR; ret val is ignored
             FlowStep(seed_views.SeedFinalizeView, button_data_selection=seed_views.SeedFinalizeView.FINALIZE),
             FlowStep(seed_views.SeedOptionsView, is_redirect=True),
-            FlowStep(seed_views.SeedSignMessageConfirmMessageView, before_run=self.inject_mesage_as_paged_message, screen_return_value=0),  # page 1/5
-            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=0),  # page 2/5
-            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=0),  # page 3/5
-            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=0),  # page 4/5
-            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=0),  # page 5/5
-
-            # Arrive at the address confirmation, then go backwards to re-review the paged message
-            FlowStep(seed_views.SeedSignMessageConfirmAddressView, screen_return_value=RET_CODE__BACK_BUTTON),  # then back to page 5/5
-            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=RET_CODE__BACK_BUTTON),  # back to page 4/5
-            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=RET_CODE__BACK_BUTTON),  # back to page 3/5
-            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=RET_CODE__BACK_BUTTON),  # back to page 2/5
-            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=RET_CODE__BACK_BUTTON),  # back to page 1/5
-
-            # Now proceed forward again to the end
-            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=0),  # page 1/5
-            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=0),  # page 2/5
-            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=0),  # page 3/5
-            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=0),  # page 4/5
-            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=0),  # page 5/5
+            # The whole message scrolls in one view (no paging): Next -> address review.
+            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=0),
+            # Back out of address review re-reviews the message, then forward again to the end.
+            FlowStep(seed_views.SeedSignMessageConfirmAddressView, screen_return_value=RET_CODE__BACK_BUTTON),
+            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=0),
             FlowStep(seed_views.SeedSignMessageConfirmAddressView, screen_return_value=0),
             FlowStep(seed_views.SeedSignMessageSignedMessageQRView, screen_return_value=0),
             FlowStep(MainMenuView),
@@ -731,7 +706,7 @@ class TestMessageSigningFlows(FlowTest):
             FlowStep(seed_views.SeedOptionsView, button_data_selection=seed_views.SeedOptionsView.SIGN_MESSAGE),
             FlowStep(scan_views.ScanView, before_run=self.load_no_whitespace_message_into_decoder),  # simulate read message QR; ret val is ignored
             FlowStep(seed_views.SeedSignMessageStartView, is_redirect=True),
-            FlowStep(seed_views.SeedSignMessageConfirmMessageView, before_run=self.inject_mesage_as_paged_message, screen_return_value=0),
+            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=0),
             FlowStep(seed_views.SeedSignMessageConfirmAddressView, screen_return_value=0),
             FlowStep(seed_views.SeedSignMessageSignedMessageQRView, screen_return_value=0),
             FlowStep(MainMenuView),

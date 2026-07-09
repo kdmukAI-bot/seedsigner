@@ -2225,32 +2225,25 @@ class SeedSignMessageStartView(View):
 
 
 class SeedSignMessageConfirmMessageView(View):
-    def __init__(self, page_num: int = 0):
-        super().__init__()
-        self.page_num = page_num  # Note: zero-indexed numbering!
-
-
     def run(self):
-        from seedsigner.gui.screens.seed_screens import SeedSignMessageConfirmMessageScreen
-
+        # Native scrollable message-review screen: the whole message renders in one scrollable
+        # body (no host paging) over a bottom "Next" button. Confirm advances to address review;
+        # back exits the sign-message flow.
         selected_menu_num = self.run_screen(
-            SeedSignMessageConfirmMessageScreen,
-            page_num=self.page_num,
+            "seed_sign_message_confirm_message_screen",
+            title=_("Review Message"),
+            message=self.controller.sign_message_data["message"],
+            button_data=[ButtonOption("Next")],
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
-            if self.page_num == 0:
-                # We're exiting this flow entirely
-                self.controller.resume_main_flow = None
-                self.controller.sign_message_data = None
+            # Exiting the sign-message flow entirely.
+            self.controller.resume_main_flow = None
+            self.controller.sign_message_data = None
             return Destination(BackStackView)
 
         # User clicked "Next"
-        if self.page_num == len(self.controller.sign_message_data["paged_message"]) - 1:
-            # We've reached the end of the paged message
-            return Destination(SeedSignMessageConfirmAddressView)
-        else:
-            return Destination(SeedSignMessageConfirmMessageView, view_args=dict(page_num=self.page_num + 1))
+        return Destination(SeedSignMessageConfirmAddressView)
 
 
 
