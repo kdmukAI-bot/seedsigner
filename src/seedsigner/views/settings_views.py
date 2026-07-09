@@ -356,16 +356,14 @@ class SettingsIngestSettingsQRView(View):
 
 
     def run(self):
-        text = ""
-        if self.config_name:
-            # User-supplied name from the scanned SettingsQR; don't translate.
-            text = f'"{self.config_name}"\n\n'
-        # status_message was already localized in __init__.
-        text += self.status_message
-
-        self.run_button_list_screen(
+        # Native settings-QR confirmation screen. The config name and status message render as
+        # two separately-positioned centered blocks, so pass them as distinct cfg keys (not one
+        # concatenated string); the screen owns the layout. config_name may be empty (status only).
+        self.run_screen(
+            "settings_qr_confirmation_screen",
             title=_("Settings QR"),
-            text=text,
+            config_name=self.config_name,
+            status_message=self.status_message,
             button_data=[ButtonOption("Home")],
             show_back_button=False,
             is_bottom_list=True,
