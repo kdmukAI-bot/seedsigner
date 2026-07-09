@@ -1599,35 +1599,34 @@ class SeedTranscribeSeedQRZoomedInView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens import seed_screens
+        from binascii import hexlify
+        from seedsigner.models.encode_qr import CompactSeedQrEncoder, SeedQrEncoder
 
         encoder_args = dict(mnemonic=self.seed.mnemonic_list,
                             wordlist_language_code=self.settings.get_value(SettingsConstants.SETTING__WORDLIST_LANGUAGE))
-        from seedsigner.models.encode_qr import CompactSeedQrEncoder, SeedQrEncoder
-        if self.seedqr_format == QRType.SEED__SEEDQR:
-            e = SeedQrEncoder(**encoder_args)
-        elif self.seedqr_format == QRType.SEED__COMPACTSEEDQR:
+        if self.seedqr_format == QRType.SEED__COMPACTSEEDQR:
+            # CompactSeedQR is raw bytes rendered in byte mode; hex-serialize it for the JSON
+            # cfg (the native screen decodes it back), mirroring the qr_display encoder mapping.
             e = CompactSeedQrEncoder(**encoder_args)
-
-        data = e.next_part()
-
-        if len(self.seed.mnemonic_list) == 24:
-            if self.seedqr_format == QRType.SEED__COMPACTSEEDQR:
-                num_modules = 25
-            else:
-                num_modules = 29
+            qr_mode, data_encoding = "byte", "hex"
+            qr_data = hexlify(bytes(e.next_part())).decode()
         else:
-            if self.seedqr_format == QRType.SEED__COMPACTSEEDQR:
-                num_modules = 21
-            else:
-                num_modules = 25
+            # Standard SeedQR is an all-numeric digit string.
+            e = SeedQrEncoder(**encoder_args)
+            qr_mode, data_encoding = "numeric", "utf8"
+            qr_data = e.next_part()
 
+        # Native zoomed-transcribe screen (pannable, direct-drawn QR). It derives the module
+        # count from the encoded data, so num_modules is not passed. allow_screensaver=False
+        # keeps the idle screensaver off while transcribing.
         self.run_screen(
-            seed_screens.SeedTranscribeSeedQRZoomedInScreen,
-            qr_data=data,
-            num_modules=num_modules,
+            "seed_transcribe_zoomed_qr_screen",
+            qr_data=qr_data,
+            qr_mode=qr_mode,
+            data_encoding=data_encoding,
             initial_zone_x=self.initial_zone_x,
             initial_zone_y=self.initial_zone_y,
+            allow_screensaver=False,
         )
 
         return Destination(SeedTranscribeSeedQRConfirmQRPromptView, view_args={"seed_num": self.seed_num})
