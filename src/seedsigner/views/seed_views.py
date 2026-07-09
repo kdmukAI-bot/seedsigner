@@ -371,18 +371,20 @@ class SeedAddPassphraseView(View):
             initial_mode=native_keyboard_mode.get(self.initial_keyboard),
         )
 
+        # Back = return to where we came from (Finalize for an initial add, Review for an edit)
+        # with no changes applied; the back-stack routes to the right origin.
         if ret == RET_CODE__BACK_BUTTON:
-            # Backed out of entry (no text returned): keep the seed's existing passphrase and
-            # offer edit / skip (fresh entry) or edit / discard (an in-progress edit).
+            return Destination(BackStackView)
+
+        # An empty submit is an explicit "no passphrase" choice. Leave the seed's existing
+        # passphrase untouched so the exit dialog offers Skip (none existed) vs Discard (one
+        # existed) off its current value; the dialog clears the passphrase itself on confirm.
+        if len(ret) == 0:
             return Destination(SeedAddPassphraseExitDialogView)
 
-        # Otherwise `ret` is the confirmed passphrase string; it might be empty.
+        # Non-empty submit: apply and review.
         self.seed.set_passphrase(ret)
-
-        if len(self.seed.passphrase) == 0:
-            return Destination(SeedAddPassphraseExitDialogView)
-        else:
-            return Destination(SeedReviewPassphraseView)
+        return Destination(SeedReviewPassphraseView)
 
 
 
