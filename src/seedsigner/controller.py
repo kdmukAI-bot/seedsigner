@@ -291,7 +291,7 @@ class Controller(Singleton):
             from seedsigner.gui.toast import RemoveSDCardToastManagerThread
 
         # Opening splash — native LVGL screen on both platforms (seedsigner_lvgl_screens
-        # .splash_screen). On MicroPython the firmware already drew the centered logo at C
+        # .opening_splash_screen). On MicroPython the firmware already drew the centered logo at C
         # boot, so the splash continues from it (OpeningSplashView passes logo_already_shown
         # per platform). Imported lazily so the flow-test harness's patched symbol is picked
         # up (tests/base.py stubs OpeningSplashView).

@@ -545,10 +545,10 @@ def run_loading_screen(text=None):
         TRANSITIONAL — at the Pi native display-pump cutover the native layer pumps in the
         background like the ESP32 task already does; then this whole CPython branch, the
         ``_LoadingPumpThread``, and ``stop_loading_pump`` (plus its ``run_screen`` seam
-        call) are deleted and this collapses to the bare ``_lv.loading_screen(cfg)`` build.
+        call) are deleted and this collapses to the bare ``_lv.loading_spinner_screen(cfg)`` build.
 
     Degrades to a no-op when the native runtime is absent (dev/CI, ``ImportError``) or when
-    the deployed firmware/.so predates the ``loading_screen`` binding, so the app change is
+    the deployed firmware/.so predates the ``loading_spinner_screen`` binding, so the app change is
     safe against whatever binary is currently on-device.
     """
     global _loading_pump
@@ -557,12 +557,12 @@ def run_loading_screen(text=None):
         ensure_lvgl_runtime()
     except ImportError:
         return  # native module absent (dev/CI)
-    if not hasattr(_lv, "loading_screen"):
+    if not hasattr(_lv, "loading_spinner_screen"):
         return  # deployed firmware/.so predates the binding
     cfg = {"text": text} if text else None
     if IS_MICROPYTHON:
         _lv.clear_result_queue()
-        _lv.loading_screen(cfg)
+        _lv.loading_spinner_screen(cfg)
         return
 
     # CPython blended display: build + paint one frame, then keep it animating via the pump
@@ -574,7 +574,7 @@ def run_loading_screen(text=None):
         _lv.set_flush_mode("python")
         _lv.set_flush_callback(_make_flush_callback(renderer.disp))
         _lv.clear_result_queue()
-        _lv.loading_screen(cfg)
+        _lv.loading_spinner_screen(cfg)
         _lv.lvgl_pump(5, 1)  # paint the first frame before we return
     _loading_pump = _LoadingPumpThread(renderer)
     _loading_pump.start()
