@@ -60,18 +60,26 @@ class TestSeedFlows(FlowTest):
         Opting to add a BIP-39 passphrase on the Finalize Seed screen should enter the
         passphrase entry / review flow and end at the SeedOptionsView. 
         """
+        # The native seed_add_passphrase_screen returns the entered string on confirm, or
+        # RET_CODE__BACK_BUTTON on back (no in-progress text). So a back-out routes to the
+        # exit dialog against the seed's *existing* passphrase: Skip when empty, Discard when set.
         self.run_sequence([
             FlowStep(MainMenuView, button_data_selection=MainMenuView.SCAN),
             FlowStep(scan_views.ScanView, before_run=load_seed_into_decoder),  # simulate read SeedQR; ret val is ignored
             FlowStep(seed_views.SeedFinalizeView, button_data_selection=seed_views.SeedFinalizeView.PASSPHRASE),
-            FlowStep(seed_views.SeedAddPassphraseView, screen_return_value=dict(passphrase="muhpassphrase", is_back_button=True)),
+            # Back out of a fresh (empty) entry -> "Skip passphrase?" -> SKIP returns to Finalize
+            FlowStep(seed_views.SeedAddPassphraseView, screen_return_value=RET_CODE__BACK_BUTTON),
+            FlowStep(seed_views.SeedAddPassphraseExitDialogView, button_data_selection=seed_views.SeedAddPassphraseExitDialogView.SKIP),
+            FlowStep(seed_views.SeedFinalizeView, button_data_selection=seed_views.SeedFinalizeView.PASSPHRASE),
+            # Confirm a passphrase -> Review; Edit re-enters the entry screen
+            FlowStep(seed_views.SeedAddPassphraseView, screen_return_value="muhpassphrase"),
+            FlowStep(seed_views.SeedReviewPassphraseView, button_data_selection=seed_views.SeedReviewPassphraseView.EDIT),
+            # Back out with a passphrase already set -> "Discard passphrase?" -> DISCARD to Finalize
+            FlowStep(seed_views.SeedAddPassphraseView, screen_return_value=RET_CODE__BACK_BUTTON),
             FlowStep(seed_views.SeedAddPassphraseExitDialogView, button_data_selection=seed_views.SeedAddPassphraseExitDialogView.DISCARD),
             FlowStep(seed_views.SeedFinalizeView, button_data_selection=seed_views.SeedFinalizeView.PASSPHRASE),
-            FlowStep(seed_views.SeedAddPassphraseView, screen_return_value=dict(passphrase="muhpassphrase", is_back_button=True)),
-            FlowStep(seed_views.SeedAddPassphraseExitDialogView, button_data_selection=seed_views.SeedAddPassphraseExitDialogView.EDIT),
-            FlowStep(seed_views.SeedAddPassphraseView, screen_return_value=dict(passphrase="muhpassphrase")),
-            FlowStep(seed_views.SeedReviewPassphraseView, button_data_selection=seed_views.SeedReviewPassphraseView.EDIT),
-            FlowStep(seed_views.SeedAddPassphraseView, screen_return_value=dict(passphrase="muhpassphrase")),
+            # Confirm again -> Review -> Done
+            FlowStep(seed_views.SeedAddPassphraseView, screen_return_value="muhpassphrase"),
             FlowStep(seed_views.SeedReviewPassphraseView, button_data_selection=seed_views.SeedReviewPassphraseView.DONE),
             FlowStep(seed_views.SeedOptionsView),
         ])
@@ -170,7 +178,7 @@ class TestSeedFlows(FlowTest):
                 if custom_extension:
                     sequence += [
                         FlowStep(seed_views.SeedFinalizeView, screen_return_value=1),  # The passphrase / custom extension button is dynamic so there's no constant to refer to here
-                        FlowStep(seed_views.SeedAddPassphraseView, screen_return_value=dict(passphrase=custom_extension)),  # This is a one-off oddity where the Screen returns dict instead of int | str
+                        FlowStep(seed_views.SeedAddPassphraseView, screen_return_value=custom_extension),  # native passphrase screen returns the entered string
                         FlowStep(seed_views.SeedReviewPassphraseView, button_data_selection=seed_views.SeedReviewPassphraseView.DONE),
                         FlowStep(seed_views.SeedOptionsView),
                     ]
