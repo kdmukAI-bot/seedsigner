@@ -544,23 +544,33 @@ class PSBTOpReturnView(View):
         Shows the OP_RETURN data
     """
     def run(self):
-        from seedsigner.gui.screens.psbt_screens import PSBTOpReturnScreen
         psbt_parser: PSBTParser = self.controller.psbt_parser
 
         if not psbt_parser:
             # Should not be able to get here
             raise Exception("Routing error")
 
-        title = _("OP_RETURN")
-        button_data = [ButtonOption("Next")]
+        # The host owns the bytes and the human-readable heuristic; the native screen takes
+        # the already-decoded form (text OR hex), never raw bytes. A "strict" decode is a
+        # good enough test for "is this human-readable?" — same heuristic as the PIL screen.
+        op_return_kwargs = {}
+        try:
+            op_return_kwargs["text"] = psbt_parser.op_return_data.decode(errors="strict")
+        except UnicodeError:
+            # MicroPython raises the UnicodeError base, not the UnicodeDecodeError subclass
+            # (which it lacks); catch the base so this works on both platforms.
+            # Contains data that can't be converted to UTF-8; show it as raw hex instead.
+            op_return_kwargs["hex"] = psbt_parser.op_return_data.hex()
+            # TRANSLATOR_NOTE: Shown when displaying OP_RETURN as non-human-readable hexadecimal data
+            op_return_kwargs["hex_label"] = _("raw hex data")
 
         selected_menu_num = self.run_screen(
-            PSBTOpReturnScreen,
-            title=title,
-            button_data=button_data,
-            op_return_data=psbt_parser.op_return_data,
+            "psbt_op_return_screen",
+            title=_("OP_RETURN"),
+            button_data=[ButtonOption("Next")],
+            **op_return_kwargs,
         )
-        
+
         if selected_menu_num == RET_CODE__BACK_BUTTON:
             return Destination(BackStackView)
 

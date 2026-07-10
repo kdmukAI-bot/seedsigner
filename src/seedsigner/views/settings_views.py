@@ -389,9 +389,13 @@ class IOTestView(View):
 
 class DonateView(View):
     def run(self):
-        from seedsigner.gui.screens import settings_screens
-
-        self.run_screen(settings_screens.DonateScreen)
+        self.run_screen(
+            "donate_screen",
+            title=_("Donate"),
+            # TRANSLATOR_NOTE: If your language uses the percent sign ("%"), your translation must also use two percent signs ("%%") due to python formatting oddities. "100%%" will be rendered as "100%".
+            text=_("SeedSigner is 100%% free & open source, funded solely by the Bitcoin community.\n\nDonate onchain or LN at:").replace("%%", "%"),
+            url="seedsigner.com",
+        )
 
         return Destination(SettingsMenuView)
 
