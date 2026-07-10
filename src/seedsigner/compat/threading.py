@@ -45,6 +45,15 @@ except ImportError:
     _threading = None
 
 
+# MicroPython's default secondary-thread stack is a few KB — enough for worker
+# loops, but importing a deep module chain on a thread (BackgroundImportThread
+# preloads the main-menu view modules) overflows it. Stacks are allocated from
+# the MicroPython heap (PSRAM on ESP32-P4), so the per-thread cost is
+# negligible there. 32 KiB is also the minimum CPython's `_thread.stack_size()`
+# accepts, which keeps `_MpThread` exercisable by the test suite on CPython.
+MP_THREAD_STACK_SIZE = 32 * 1024
+
+
 class _MpThread:
     """Minimal `threading.Thread` workalike over `_thread.start_new_thread`.
 
@@ -78,6 +87,8 @@ class _MpThread:
     def start(self):
         self._started = True
         self._finished = False
+        # Applies to threads created after this call on the current platform.
+        _thread.stack_size(MP_THREAD_STACK_SIZE)
         _thread.start_new_thread(self._bootstrap, ())
 
     def is_alive(self):

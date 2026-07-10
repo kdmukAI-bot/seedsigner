@@ -101,6 +101,17 @@ class PSBTOverviewView(View):
 
     def run(self):
         from seedsigner.gui.lvgl_config import btc_amount_from_sats
+
+        # Every PSBT entry path converges on this View, and the signed result
+        # (several screens later) is rendered as an animated UR QR; warm that
+        # encode chain (encode_qr -> helpers.ur2/qr, ~10 modules) in the
+        # background while the user reviews the transaction so the post-signing
+        # QR screen appears without an import stall on MicroPython's slow VFS.
+        # Spawned here rather than in __init__ so it doesn't compete with the
+        # PSBTParser parse for the interpreter.
+        from seedsigner.models.threads import ModulePreloadThread
+        ModulePreloadThread('seedsigner.models.encode_qr').start()
+
         psbt_parser = self.controller.psbt_parser
 
         change_data = psbt_parser.change_data
