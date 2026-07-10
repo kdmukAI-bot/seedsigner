@@ -1,17 +1,19 @@
 import logging
 import time
 
-from embit.descriptor import Descriptor
-from embit.psbt import PSBT
-from seedsigner.models.psbt_parser import PSBTParser
-from seedsigner.models.seed import Seed
-from seedsigner.models.seed_storage import SeedStorage
 from seedsigner.models.settings import Settings
 from seedsigner.models.settings import SettingsConstants
 from seedsigner.models.singleton import Singleton
 from seedsigner.models.threads import BaseThread
 from seedsigner.compat import IS_MICROPYTHON
 from seedsigner.views.view import Destination, Screensaver, View
+
+# embit and the PSBT/Seed model modules are deliberately NOT imported at module
+# level: on MicroPython every first-time module load pays ~60-130ms of VFS
+# overhead, and the embit subtree alone is ~20 files (~3.4s on ESP32-P4) —
+# loading it here would block the opening splash. The class attributes below
+# reference these types as string annotations only; BackgroundImportThread
+# warms the real modules behind the splash.
 
 
 logger = logging.getLogger(__name__)
@@ -66,28 +68,33 @@ class BackgroundImportThread(BaseThread):
             __import__(module_name)
             # print(f"{time.time() - last:0.4f}: {module_name}")
 
-        time_import('embit')
-        time_import('seedsigner.helpers.embit_utils')
-
-        # Do costly initializations
+        # Populate the in-memory seed storage first: any seed-related flow blocks
+        # on Controller._storage (see the `storage` property), so this is the
+        # preload with a hard consumer. Pulls in seed.py's embit chain
+        # (bip39/bip32/bip85).
         time_import('seedsigner.models.seed_storage')
         from seedsigner.models.seed_storage import SeedStorage
         Controller.get_instance()._storage = SeedStorage()
 
         if not IS_MICROPYTHON:
-            # CPython-only warm-ups: numpy, the camera stream, and the menu view
-            # modules. The view modules aren't pre-warmed on MicroPython because
-            # importing their deep dependency chain on this background thread overflows
-            # its small secondary-thread stack; there, the first navigation imports
-            # them lazily on the main thread instead.
+            # CPython-only warm-ups for the camera stream.
             time_import('numpy')  # used by PiVideoStream; by far the slowest import (2.29s)
             time_import('seedsigner.hardware.pivideostream')
 
-            # Get MainMenuView ready to respond quickly
-            time_import('seedsigner.views.scan_views')
-            time_import('seedsigner.views.seed_views')
-            time_import('seedsigner.views.tools_views')
-            time_import('seedsigner.views.settings_views')
+        # Get MainMenuView's four destinations ready to respond quickly. On
+        # MicroPython this deep import chain needs the enlarged secondary-thread
+        # stack set by compat.threading (the default few-KB stack overflows).
+        time_import('seedsigner.views.scan_views')
+        time_import('seedsigner.views.seed_views')
+        time_import('seedsigner.views.tools_views')
+        time_import('seedsigner.views.settings_views')
+
+        # Warm the rest of the signing surface: controller.py no longer imports
+        # embit or the PSBT parser at module level (see the note at the top of
+        # this file), so pull them in here behind the splash/menu.
+        time_import('embit')
+        time_import('seedsigner.helpers.embit_utils')
+        time_import('seedsigner.models.psbt_parser')
 
         # Warm up the LVGL runtime so the first LVGL screen renders without the
         # init cost (a successful init logs from ensure_lvgl_runtime). The native
@@ -125,18 +132,18 @@ class Controller(Singleton):
 
     # Declare class member vars with type hints to enable richer IDE support throughout
     # the code.
-    _storage: SeedStorage = None   # TODO: Rename "storage" to something more indicative of its temp, in-memory state
+    _storage: "SeedStorage" = None   # TODO: Rename "storage" to something more indicative of its temp, in-memory state
     settings: Settings = None
 
     # TODO: Refactor these flow-related attrs that survive across multiple Screens.
     # TODO: Should all in-memory flow-related attrs get wiped on MainMenuView?
-    psbt: PSBT = None
-    psbt_seed: Seed = None
-    psbt_parser: PSBTParser = None
+    psbt: "PSBT" = None
+    psbt_seed: "Seed" = None
+    psbt_parser: "PSBTParser" = None
 
     unverified_address = None
 
-    multisig_wallet_descriptor: Descriptor = None
+    multisig_wallet_descriptor: "Descriptor" = None
 
     image_entropy_preview_frames = None
     image_entropy_final_image = None
@@ -251,7 +258,7 @@ class Controller(Singleton):
         return self._storage
 
 
-    def get_seed(self, seed_num: int) -> Seed:
+    def get_seed(self, seed_num: int) -> "Seed":
         if seed_num < len(self.storage.seeds):
             return self.storage.seeds[seed_num]
         else:
