@@ -523,13 +523,17 @@ class PowerOptionsView(View):
 class RestartView(View):
 
     def run(self):
-        from seedsigner.gui.screens.screen import ResetScreen
-
         if not self.renderer.is_screenshot_generator:
             # We don't want the screenshot generator to actually try to do the restart
             RestartView.DoResetThread().start()
 
-        self.run_screen(ResetScreen)
+        # No back/power button — the app restarts itself (DoResetThread execs a new
+        # process), so this never returns; the poll loop blocks until the exec lands.
+        self.run_screen(
+            "reset_screen",
+            title=_("Restarting"),
+            text=_("SeedSigner is restarting.\n\nAll in-memory data will be wiped."),
+        )
 
 
     class DoResetThread(BaseThread):
@@ -554,8 +558,11 @@ class RestartView(View):
 
 class PowerOffView(View):
     def run(self):
-        from seedsigner.gui.screens.screen import PowerOffNotRequiredScreen
-        self.run_screen(PowerOffNotRequiredScreen)
+        self.run_screen(
+            "power_off_not_required_screen",
+            title=_("Just Unplug It"),
+            text=_("It is safe to disconnect power at any time."),
+        )
         return Destination(BackStackView)
 
 
