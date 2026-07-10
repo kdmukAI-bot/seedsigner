@@ -599,6 +599,11 @@ class PSBTFinalizeView(View):
             return Destination(BackStackView)
 
         else:
+            # Signing can take a while on larger PSBTs; show a spinner while it runs.
+            # Fire-and-forget spinner; the next screen's run_screen tears it down.
+            from seedsigner.gui.lvgl_screen_runner import run_loading_screen
+            run_loading_screen(_("Signing..."))
+
             # Sign PSBT
             sig_cnt = PSBTParser.sig_count(psbt)
             psbt.sign_with(psbt_parser.root)
