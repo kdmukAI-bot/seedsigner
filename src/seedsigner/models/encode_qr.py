@@ -47,7 +47,7 @@ def build_xpub_data(seed, derivation, network, sig_type) -> XpubData:
 
 
 class BaseQrEncoder:
-    def __init__(self, qr_density: str = SettingsConstants.DENSITY__MEDIUM, **kwargs):
+    def __init__(self, qr_density: int = SettingsConstants.DENSITY__DEFAULT, **kwargs):
         self.qr_density = qr_density
         super().__init__(**kwargs)
         self.qr = QR()
@@ -60,6 +60,20 @@ class BaseQrEncoder:
     @property
     def qr_max_fragment_size(self):
         raise Exception("Not implemented in child class")
+
+    @property
+    def qr_px_per_module(self) -> int:
+        """The QR density setting (SETTING__QR_DENSITY) as an int pixels-per-module (3-6).
+
+        Clamped to the supported band, so a hand-edited settings.json or a legacy tier that
+        slipped past the read-time migration can't produce an out-of-range lookup key — it
+        falls back to the default rather than raising while a signing QR is on screen."""
+        from seedsigner.models.qr_density import QR_PX_PER_MODULE_MIN, QR_PX_PER_MODULE_MAX
+        try:
+            px = int(self.qr_density)
+        except (TypeError, ValueError):
+            px = int(SettingsConstants.DENSITY__DEFAULT)
+        return min(QR_PX_PER_MODULE_MAX, max(QR_PX_PER_MODULE_MIN, px))
 
     def seq_len(self):
         raise Exception("Not implemented in child class")
@@ -260,14 +274,16 @@ class SpecterLegacyXPubQrEncoder(BaseSimpleAnimatedQREncoder):
         super().__init__(**kwargs)
 
 
+    # Fixed fragment size, formerly the "Medium" tier of the old Low/Medium/High density
+    # model. The resolution-aware px/module density model (QR_DENSITY_BY_RESOLUTION) targets
+    # the UR fountain encoders only; this legacy "pXofY" format is out of scope for it. This
+    # encoder is expected to be unimportant, and is likely to be removed entirely in the near
+    # future (see the class docstring), so it simply keeps the old Medium value.
+    QR_MAX_FRAGMENT_SIZE = 65
+
     @property
     def qr_max_fragment_size(self):
-        density_mapping = {
-            SettingsConstants.DENSITY__LOW: 40,
-            SettingsConstants.DENSITY__MEDIUM: 65,
-            SettingsConstants.DENSITY__HIGH: 90,
-        }
-        return density_mapping.get(self.qr_density, 65)
+        return self.QR_MAX_FRAGMENT_SIZE
 
 
     def _create_parts(self):
@@ -292,6 +308,21 @@ class SpecterLegacyXPubQrEncoder(BaseSimpleAnimatedQREncoder):
 
 
 
+def _vertical_resolution() -> int:
+    """The active display's vertical resolution (px), for the density lookup.
+
+    Reads whichever Renderer is configured (PIL on CPython/Pi, LvglRenderer on MicroPython).
+    Falls back to the smallest supported panel (240) when no Renderer is configured yet — e.g.
+    a unit test that builds an encoder directly — so resolving density never crashes."""
+    try:
+        from seedsigner.gui.renderer import Renderer
+        resolution = int(Renderer.get_instance().canvas_height)
+    except Exception:
+        # Unconfigured singleton, or a mocked/absent Renderer (int() rejects a non-number).
+        resolution = 0
+    return resolution or 240
+
+
 """**************************************************************************************
     Fountain encoded animated QR encoders
 **************************************************************************************"""
@@ -309,12 +340,10 @@ class BaseFountainQrEncoder(BaseQrEncoder):
 
     @property
     def qr_max_fragment_size(self):
-        density_mapping = {
-            SettingsConstants.DENSITY__LOW: 10,
-            SettingsConstants.DENSITY__MEDIUM: 30,
-            SettingsConstants.DENSITY__HIGH: 120,
-        }
-        return density_mapping.get(self.qr_density, 30)
+        # Resolution-aware: pick the densest per-frame byte budget that still renders the QR
+        # at >= the selected pixels-per-module on this panel. See models/qr_density.py.
+        from seedsigner.models.qr_density import max_fragment_len_for
+        return max_fragment_len_for(_vertical_resolution(), self.qr_px_per_module)
 
 
     def _create_parts(self):
