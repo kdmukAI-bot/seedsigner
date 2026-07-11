@@ -5,9 +5,12 @@ from seedsigner.models.seed import Seed
 
 from seedsigner.models.settings_definition import SettingsConstants
 
+from ur_native import requires_native_ur
+
 
 
 # this is an of this bug: https://github.com/Foundation-Devices/foundation-ur-py/issues/3
+@requires_native_ur
 def test_ur_qr_decode_multisig():
 
     qrcodes = [
@@ -101,6 +104,7 @@ def test_base64_single_frame_singlsig():
     assert len(pp.destination_addresses) == 2
 
 
+@requires_native_ur
 def test_ur2_sparrow_singlesig_to_self():
     qrcodes = [
         "UR:CRYPTO-PSBT/435-3/LPCFADQDAXCFAOOECYMSTBHDCSHDVYHTAXLATPBEOEDPAYIAWSYNAMSGSARSURCLDRKNFYZEWLHLMDTNATNYNSETJNZOKBGLFMRTMWOTLAFSSTYNTIPTLTTLWPVOZEHTAHTESNYADSHYVYFPDEBTBAIHIYTLWFUERDLKWTLSNLMWCHNDPSBWGRUTKSYLFLATVDCYNTDNGDTNURYLTTGUSSHNAEEEFZSRLEKEHDEMCYOTLDEMOTZORFDPKBCLBEHNREFWIDOSRSLRIOIAOXNLADDYENFMVOGLSGECDKBECSDSLUHNDTWYYTWFSNSPPESAZCGUDLDABAISLNJLWKJPRHBBRTEHYALRJYNYKPEOGLGLOLCPPYSEZTCHVLFMPELDGWCXGMSPHPGWAOKNBALOFXJLKNONPRBAPKYKIEVETEDWFXMDRTVWBYKSZTBTCLSGCSCPIYTPTYGYKIYNRTJLHLIEMNJYCTVYUEHGPRHN"
