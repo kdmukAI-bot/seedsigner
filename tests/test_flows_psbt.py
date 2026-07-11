@@ -1,4 +1,5 @@
 from base import FlowTest, FlowStep
+from ur_native import requires_native_ur
 
 from seedsigner.controller import Controller
 from seedsigner.views.view import MainMenuView
@@ -8,6 +9,7 @@ from seedsigner.models.settings import SettingsConstants
 
 class TestPSBTFlows(FlowTest):
 
+    @requires_native_ur
     def test_scan_psbt_first_then_correct_seedqr_flow(self):
         """
             Selecting "Scan" from the MainMenuView and scanning a PSBT should enter the PSBTSelectSeedView flow
@@ -91,6 +93,7 @@ class TestPSBTFlows(FlowTest):
         self.run_sequence(sequence)
 
 
+    @requires_native_ur
     def test_scan_multisig_psbt_seed_already_signed_flow(self):
         
         def load_psbt_into_decoder(view: scan_views.ScanView):
@@ -128,6 +131,7 @@ class TestPSBTFlows(FlowTest):
         ])
 
 
+    @requires_native_ur
     def test_parse_and_display_op_return_content(self):
         """
             PSBTs that include an OP_RETURN should be able to be parsed like any other
