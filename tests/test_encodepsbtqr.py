@@ -111,16 +111,16 @@ def test_ur_xpub_qr():
 
 
 def test_qr_px_per_module_clamps_and_falls_back():
-    """The density setting is int()'d, clamped to the 3-6 band, and legacy / garbage values
+    """The density setting is int()'d, clamped to the 2-6 band, and legacy / garbage values
     fall back to the default (5) rather than raising while a signing QR is on screen."""
     from seedsigner.models.encode_qr import BaseQrEncoder
 
     def px(density):
         return BaseQrEncoder(qr_density=density).qr_px_per_module
 
-    assert px(SettingsConstants.DENSITY__3) == 3
+    assert px(SettingsConstants.DENSITY__2) == 2
     assert px(SettingsConstants.DENSITY__6) == 6
-    assert px(2) == 3          # below the band -> clamp up
+    assert px(1) == 2          # below the band -> clamp up
     assert px(9) == 6          # above the band -> clamp down
     assert px("M") == 5        # a legacy tier that slipped past migration -> default
     assert px(None) == 5       # garbage -> default
