@@ -12,7 +12,7 @@ def test_ur_psbt_qr_encode():
 
     tx = psbt.PSBT.parse(a2b_base64(base64_psbt))
 
-    e = UrPsbtQrEncoder(psbt=tx, qr_density=SettingsConstants.DENSITY__MEDIUM)
+    e = UrPsbtQrEncoder(psbt=tx, qr_density=SettingsConstants.DENSITY__5)
 
     cnt = 0
     while cnt <= 10:
@@ -70,12 +70,13 @@ def test_build_xpub_data():
 def test_specter_xpub_qr():
     mnemonic = "obscure bone gas open exotic abuse virus bunker shuffle nasty ship dash"
 
-    e = SpecterLegacyXPubQrEncoder(seed=Seed(mnemonic.split(" "), passphrase="pass"), network=SettingsConstants.TESTNET, derivation="m/48h/1h/0h/2h", qr_density=SettingsConstants.DENSITY__LOW)
+    # The Specter legacy encoder now uses a fixed fragment size (formerly the "Medium" tier);
+    # qr_density no longer affects its split. See SpecterLegacyXPubQrEncoder.
+    e = SpecterLegacyXPubQrEncoder(seed=Seed(mnemonic.split(" "), passphrase="pass"), network=SettingsConstants.TESTNET, derivation="m/48h/1h/0h/2h")
 
-    assert e.next_part() == "p1of4 [c49122a5/48h/1h/0h/2h]Vpub5mXgECaX5yYDN"
-    assert e.next_part() == "p2of4 c5VnUG4jVNptyEg65qUjuofWchQeuMWWiq8rcPBo"
-    assert e.next_part() == "p3of4 MxfrVggXj5NJmaNEToWpax8GMMucozvAdqf1bW1J"
-    assert e.next_part() == "p4of4 sZsfdBzsK3VUC5"
+    assert e.next_part() == "p1of3 [c49122a5/48h/1h/0h/2h]Vpub5mXgECaX5yYDNc5VnUG4jVNptyEg65qUjuofWc"
+    assert e.next_part() == "p2of3 hQeuMWWiq8rcPBoMxfrVggXj5NJmaNEToWpax8GMMucozvAdqf1bW1JsZsfdBzsK3"
+    assert e.next_part() == "p3of3 VUC5"
 
 
 
@@ -86,24 +87,66 @@ def test_ur_xpub_qr():
         seed=Seed(mnemonic.split(), passphrase="pass"),
         network=SettingsConstants.MAINNET,
         derivation="m/48h/1h/0h/2h",
-        qr_density=SettingsConstants.DENSITY__MEDIUM
+        qr_density=SettingsConstants.DENSITY__5
     )
 
-    assert e.next_part() == "UR:CRYPTO-ACCOUNT/1-4/LPADAACSKPCYMOMNLGRYHDCKOEADCYSSMECPONAOLYTAADMETAADDLOXAXHDCLAOKSRLNLKPUEGYATHPMNSNIYMUECBY"
-    assert e.next_part() == "UR:CRYPTO-ACCOUNT/2-4/LPAOAACSKPCYMOMNLGRYHDCKKKGHZMLUZORPVDGUOTECSTTKTOLPCWPTNTLKZTTIZTBEAAHDCXVDTPMYRSTDMOPSCXFZ"
-    assert e.next_part() == "UR:CRYPTO-ACCOUNT/3-4/LPAXAACSKPCYMOMNLGRYHDCKSPZSBZSPGERLGDATUYNLPYBTGYIYYKBTWTAOSWKSVTSGCHBYDKYAVDAMTAADMONDGDFD"
-    assert e.next_part() == "UR:CRYPTO-ACCOUNT/4-4/LPAAAACSKPCYMOMNLGRYHDCKDYOTADLOCSDYYKADYKAEYKAOYKAOCYSSMECPONAXAAAYCYIOREKKJKAEAEAEWZWDMYON"    
+    assert e.next_part() == "UR:CRYPTO-ACCOUNT/1-2/LPADAOCSKPCYMOMNLGRYHDFROEADCYSSMECPONAOLYTAADMETAADDLOXAXHDCLAOKSRLNLKPUEGYATHPMNSNKKGHZMLUZORPVDGUOTECSTTKTOLPCWPTNTLKZTTIZTBEAAHDCXVDTPMYRSRFRPKBLA"
+    assert e.next_part() == "UR:CRYPTO-ACCOUNT/2-2/LPAOAOCSKPCYMOMNLGRYHDFRTDSPZSBZSPGERLGDATUYNLPYBTGYIYYKBTWTAOSWKSVTSGCHBYDKYAVDAMTAADDYOTADLOCSDYYKADYKAEYKAOYKAOCYSSMECPONAXAAAYCYIOREKKJKAEUORYJNVT"
 
 
     e = UrXpubQrEncoder(
         seed=Seed(mnemonic.split(), passphrase="pass"),
         network=SettingsConstants.TESTNET,
         derivation="m/48h/1h/0h/2h",
-        qr_density=SettingsConstants.DENSITY__MEDIUM
+        qr_density=SettingsConstants.DENSITY__5
     )
 
-    assert e.next_part() == "UR:CRYPTO-ACCOUNT/1-5/LPADAHCSKECYRTPEDKMOHDCFOEADCYSSMECPONAOLYTAADMETAADDLONAXHDCLAOKSRLNLKPUENSAHBTHS"
-    assert e.next_part() == "UR:CRYPTO-ACCOUNT/2-5/LPAOAHCSKECYRTPEDKMOHDCFGYATHPMNSNKKGHZMLUZORPVDGUOTECSTTKTOLPCWPTNTLKZTTIZTNDJSCF"
-    assert e.next_part() == "UR:CRYPTO-ACCOUNT/3-5/LPAXAHCSKECYRTPEDKMOHDCFZTBEAAHDCXVDTPMYRSTDSPZSBZSPGERLGDATUYNLPYBTGYIYYKBDFGWPKE"
-    assert e.next_part() == "UR:CRYPTO-ACCOUNT/4-5/LPAAAHCSKECYRTPEDKMOHDCFBTWTAOSWKSVTSGCHBYDKYAVDAHTAADEHOYAOADAMTAADDYOTADGYBKBWFE"
-    assert e.next_part() == "UR:CRYPTO-ACCOUNT/5-5/LPAHAHCSKECYRTPEDKMOHDCFLOCSDYYKADYKAEYKAOYKAOCYSSMECPONAXAAAYCYIOREKKJKAETODLFYWP"
+    assert e.next_part() == "UR:CRYPTO-ACCOUNT/1-2/LPADAOCSKECYRTPEDKMOHDFMOEADCYSSMECPONAOLYTAADMETAADDLONAXHDCLAOKSRLNLKPUEGYATHPMNSNKKGHZMLUZORPVDGUOTECSTTKTOLPCWPTNTLKZTTIZTBEAAHDCXVDTPMYRSTDSPZSONAHOSHY"
+    assert e.next_part() == "UR:CRYPTO-ACCOUNT/2-2/LPAOAOCSKECYRTPEDKMOHDFMBZSPGERLGDATUYNLPYBTGYIYYKBTWTAOSWKSVTSGCHBYDKYAVDAHTAADEHOYAOADAMTAADDYOTADLOCSDYYKADYKAEYKAOYKAOCYSSMECPONAXAAAYCYIOREKKJKJLFLYLCL"
+
+
+
+def test_qr_px_per_module_clamps_and_falls_back():
+    """The density setting is int()'d, clamped to the 3-6 band, and legacy / garbage values
+    fall back to the default (5) rather than raising while a signing QR is on screen."""
+    from seedsigner.models.encode_qr import BaseQrEncoder
+
+    def px(density):
+        return BaseQrEncoder(qr_density=density).qr_px_per_module
+
+    assert px(SettingsConstants.DENSITY__3) == 3
+    assert px(SettingsConstants.DENSITY__6) == 6
+    assert px(2) == 3          # below the band -> clamp up
+    assert px(9) == 6          # above the band -> clamp down
+    assert px("M") == 5        # a legacy tier that slipped past migration -> default
+    assert px(None) == 5       # garbage -> default
+
+
+def test_fountain_fragment_size_matches_active_resolution():
+    """A fountain encoder's fragment size is the density-table cell for (active resolution,
+    px/module) -- i.e. it wires the renderer's height and the density setting into the lookup."""
+    from seedsigner.models.encode_qr import _vertical_resolution
+    from seedsigner.models.qr_density import max_fragment_len_for
+
+    seed = Seed("obscure bone gas open exotic abuse virus bunker shuffle nasty ship dash".split(), passphrase="pass")
+    e = UrXpubQrEncoder(seed=seed, network=SettingsConstants.MAINNET,
+                        derivation="m/48h/1h/0h/2h", qr_density=SettingsConstants.DENSITY__5)
+    assert e.qr_max_fragment_size == max_fragment_len_for(_vertical_resolution(), 5)
+
+
+def test_fountain_fragment_size_tracks_resolution(monkeypatch):
+    """Changing the active vertical resolution re-resolves the fragment size through the table."""
+    import seedsigner.models.encode_qr as enc_mod
+    from seedsigner.models.qr_density import QR_DENSITY_BY_RESOLUTION
+
+    seed = Seed("obscure bone gas open exotic abuse virus bunker shuffle nasty ship dash".split(), passphrase="pass")
+
+    def frag(resolution, density):
+        monkeypatch.setattr(enc_mod, "_vertical_resolution", lambda: resolution)
+        e = UrXpubQrEncoder(seed=seed, network=SettingsConstants.MAINNET,
+                            derivation="m/48h/1h/0h/2h", qr_density=density)
+        return e.qr_max_fragment_size
+
+    assert frag(480, SettingsConstants.DENSITY__4) == QR_DENSITY_BY_RESOLUTION[480][4]
+    assert frag(320, SettingsConstants.DENSITY__5) == QR_DENSITY_BY_RESOLUTION[320][5]
+    assert frag(240, SettingsConstants.DENSITY__6) == QR_DENSITY_BY_RESOLUTION[240][6]

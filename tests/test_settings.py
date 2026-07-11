@@ -38,6 +38,29 @@ class TestSettings(BaseTest):
             assert settings.get_value(settings_entry.attr_name) == settings_entry.default_value
 
 
+    def test_legacy_qr_density_migrates_on_settingsqr_import(self):
+        """ An old SettingsQR carrying a legacy Low/Medium/High density must still import
+        (not raise on validation) and resolve to the current px/module default. """
+        for legacy in SettingsConstants.LEGACY_DENSITIES:
+            _, updated = Settings.parse_settingsqr(f"settings::v1 qr_density={legacy}")
+            assert updated[SettingsConstants.SETTING__QR_DENSITY] == SettingsConstants.DENSITY__DEFAULT
+
+
+    def test_new_qr_density_passes_through_settingsqr_import(self):
+        """ A px/module density value round-trips through SettingsQR as its integer. """
+        _, updated = Settings.parse_settingsqr("settings::v1 qr_density=3")
+        assert updated[SettingsConstants.SETTING__QR_DENSITY] == SettingsConstants.DENSITY__3
+
+
+    def test_legacy_qr_density_migrates_on_load(self):
+        """ A settings.json written before the px/module switch loads to the default rather
+        than persisting the now-invalid legacy tier. """
+        BaseTest.reset_settings()
+        settings = Settings.get_instance()
+        settings.update({SettingsConstants.SETTING__QR_DENSITY: "M"})
+        assert settings.get_value(SettingsConstants.SETTING__QR_DENSITY) == SettingsConstants.DENSITY__DEFAULT
+
+
     def test_load_persistent_settings(self):
         """ Settings should load previously saved persistent settings from disk, if any
         exist. """
@@ -47,8 +70,8 @@ class TestSettings(BaseTest):
         # Enable persistent settings and make another change
         settings.set_value(SettingsConstants.SETTING__PERSISTENT_SETTINGS, SettingsConstants.OPTION__ENABLED)
 
-        assert settings.get_value(SettingsConstants.SETTING__QR_DENSITY) != SettingsConstants.DENSITY__HIGH
-        settings.set_value(SettingsConstants.SETTING__QR_DENSITY, SettingsConstants.DENSITY__HIGH)
+        assert settings.get_value(SettingsConstants.SETTING__QR_DENSITY) != SettingsConstants.DENSITY__3
+        settings.set_value(SettingsConstants.SETTING__QR_DENSITY, SettingsConstants.DENSITY__3)
 
         # Hold on to the settings.json content
         settings_json = None
@@ -66,7 +89,7 @@ class TestSettings(BaseTest):
         settings = Settings.get_instance()
 
         # Persistent setting change should have survived
-        assert settings.get_value(SettingsConstants.SETTING__QR_DENSITY) == SettingsConstants.DENSITY__HIGH
+        assert settings.get_value(SettingsConstants.SETTING__QR_DENSITY) == SettingsConstants.DENSITY__3
 
 
     def test_load_empty_multiselect_settings(self):
@@ -118,12 +141,12 @@ class TestSettings(BaseTest):
         settings = Settings.get_instance()
         # Each set_value triggers save() through the mpy-strict dump; must not raise.
         settings.set_value(SettingsConstants.SETTING__PERSISTENT_SETTINGS, SettingsConstants.OPTION__ENABLED)
-        settings.set_value(SettingsConstants.SETTING__QR_DENSITY, SettingsConstants.DENSITY__HIGH)
+        settings.set_value(SettingsConstants.SETTING__QR_DENSITY, SettingsConstants.DENSITY__3)
 
         # The file must be valid, non-empty JSON that reloads.
         with open(Settings.SETTINGS_FILENAME) as settings_file:
             data = json.load(settings_file)
-        assert data[SettingsConstants.SETTING__QR_DENSITY] == SettingsConstants.DENSITY__HIGH
+        assert data[SettingsConstants.SETTING__QR_DENSITY] == SettingsConstants.DENSITY__3
 
 
     def test_corrupt_settings_file_boots_to_defaults(self):

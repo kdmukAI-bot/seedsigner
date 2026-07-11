@@ -120,6 +120,11 @@ class Settings(Singleton):
                 logger.info(f"Ignoring unrecognized attribute: {abbreviated_name}")
                 continue
 
+            # Migrate a legacy Low/Medium/High QR density (from an older SettingsQR) to the
+            # current default before validation, so an old backup still imports.
+            if settings_entry.attr_name == SettingsConstants.SETTING__QR_DENSITY:
+                value = SettingsConstants.migrate_legacy_qr_density(value)
+
             # Validate value(s) against SettingsDefinition's valid options
             if type(value) is not list:
                 values = [value]
@@ -168,6 +173,12 @@ class Settings(Singleton):
                 * Hidden settings that have a value remain as-is.
                 * All other missing settings are set to their default value.
         """
+        # Migrate a legacy Low/Medium/High QR density (from a settings.json written before the
+        # px/module switch) to the current default so the value stays valid downstream.
+        if SettingsConstants.SETTING__QR_DENSITY in new_settings:
+            new_settings[SettingsConstants.SETTING__QR_DENSITY] = SettingsConstants.migrate_legacy_qr_density(
+                new_settings[SettingsConstants.SETTING__QR_DENSITY])
+
         for entry in SettingsDefinition.settings_entries:
             if entry.attr_name not in new_settings:
                 if entry.visibility == SettingsConstants.VISIBILITY__HIDDEN and entry.attr_name in self._data:

@@ -317,21 +317,37 @@ class SettingsConstants:
         (CAMERA_ROTATION__270, _mft("270°")),
     ]
 
-    # QR code constants
-    DENSITY__LOW = "L"
-    DENSITY__MEDIUM = "M"
-    DENSITY__HIGH = "H"
-    # TRANSLATOR_NOTE: QR code density option: Low, Medium, High
-    density_low = _mft("Low")
-    # TRANSLATOR_NOTE: QR code density option: Low, Medium, High
-    density_medium = _mft("Medium")
-    # TRANSLATOR_NOTE: QR code density option: Low, Medium, High
-    density_high = _mft("High")
+    # QR code density: integer pixels-per-module (3-6), the readability knob for animated
+    # QRs. Lower number = smaller modules = more data per frame (fewer frames) but harder for
+    # a camera to scan; higher number = bigger modules, easier to scan, less data per frame.
+    # The per-frame byte budget is derived from this via models/qr_density.py. Stored as ints
+    # (like ALL_CAMERA_ROTATIONS) so SettingsQR round-trips them; replaces the old Low/Medium/
+    # High tiers. See docs/qr-density-redesign-instructions.md.
+    DENSITY__3 = 3
+    DENSITY__4 = 4
+    DENSITY__5 = 5
+    DENSITY__6 = 6
+    DENSITY__DEFAULT = DENSITY__5
+    # TRANSLATOR_NOTE: QR density option; the parenthetical warns that this densest setting is
+    # harder for a camera to scan. "3" is the pixels-per-module value and is not translated.
+    density_3 = _mft("3 (very high density — harder to scan)")
+    # TRANSLATOR_NOTE: QR density option — a bare pixels-per-module number, kept untranslated.
+    density_4 = _mft("4")
+    # TRANSLATOR_NOTE: QR density option — a bare pixels-per-module number, kept untranslated.
+    density_5 = _mft("5")
+    # TRANSLATOR_NOTE: QR density option; the parenthetical notes this sparsest setting is
+    # easier to scan but carries less data. "6" is the pixels-per-module value, not translated.
+    density_6 = _mft("6 (low density — easier to scan, less data)")
     ALL_DENSITIES = [
-        (DENSITY__LOW, density_low),
-        (DENSITY__MEDIUM, density_medium),
-        (DENSITY__HIGH, density_high),
+        (DENSITY__3, density_3),
+        (DENSITY__4, density_4),
+        (DENSITY__5, density_5),
+        (DENSITY__6, density_6),
     ]
+    # Legacy Low/Medium/High density values that predate the px/module model. Mapped to
+    # DENSITY__DEFAULT on read (see migrate_legacy_qr_density) so an upgrading user's
+    # settings.json and any older SettingsQR backups keep loading instead of erroring.
+    LEGACY_DENSITIES = ("L", "M", "H")
 
     # Seed-related constants
     MAINNET = "M"
@@ -352,6 +368,19 @@ class SettingsConstants:
             return "test"
         if network == SettingsConstants.REGTEST:
             return "regtest"
+
+    @classmethod
+    def migrate_legacy_qr_density(cls, value):
+        """Map a legacy Low/Medium/High density value to the current px/module default.
+
+        The QR density model moved from named tiers ("L"/"M"/"H") to integer pixels-per-
+        module (3-6). A settings.json or SettingsQR written before that switch carries a
+        legacy tier; map any of them to DENSITY__DEFAULT so the value stays valid. Anything
+        already in the new model (or anything unrecognized) passes through unchanged.
+        """
+        if value in cls.LEGACY_DENSITIES:
+            return cls.DENSITY__DEFAULT
+        return value
     
     PERSISTENT_SETTINGS__SD_INSERTED__HELP_TEXT = _mft("Store Settings on SD card")
     PERSISTENT_SETTINGS__SD_REMOVED__HELP_TEXT = _mft("Insert SD card to enable")
@@ -686,11 +715,11 @@ class SettingsDefinition:
 
         SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
                       attr_name=SettingsConstants.SETTING__QR_DENSITY,
-                      display_name=_mft("QR code density"),
+                      display_name=_mft("QR density (pixels per module)"),
                       type=SettingsConstants.TYPE__SELECT_1,
                       visibility=SettingsConstants.VISIBILITY__ADVANCED,
                       selection_options=SettingsConstants.ALL_DENSITIES,
-                      default_value=SettingsConstants.DENSITY__MEDIUM),
+                      default_value=SettingsConstants.DENSITY__DEFAULT),
 
         SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
                       attr_name=SettingsConstants.SETTING__SIG_TYPES,
