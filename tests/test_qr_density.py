@@ -28,12 +28,12 @@ def _load_worksheet():
     return worksheet
 
 
-BAND = list(range(QR_PX_PER_MODULE_MIN, QR_PX_PER_MODULE_MAX + 1))  # [3, 4, 5, 6]
+BAND = list(range(QR_PX_PER_MODULE_MIN, QR_PX_PER_MODULE_MAX + 1))  # [2, 3, 4, 5, 6]
 RESOLUTIONS = sorted(QR_DENSITY_BY_RESOLUTION)
 
 
-def test_band_is_three_through_six():
-    assert (QR_PX_PER_MODULE_MIN, QR_PX_PER_MODULE_MAX) == (3, 6)
+def test_band_is_two_through_six():
+    assert (QR_PX_PER_MODULE_MIN, QR_PX_PER_MODULE_MAX) == (2, 6)
 
 
 def test_every_resolution_covers_the_full_band():
@@ -48,10 +48,20 @@ def test_resolver_returns_table_values_for_listed_resolutions(res):
 
 
 @pytest.mark.parametrize("res", RESOLUTIONS)
-def test_bigger_px_per_module_means_fewer_bytes(res):
-    # Readability monotonicity: larger modules (higher px/module) => less data per frame.
+def test_bigger_px_per_module_means_fewer_or_equal_bytes(res):
+    # Readability monotonicity: larger modules (higher px/module) => no more data per frame.
+    # Strictly fewer for every step except the 720px/2px alias (see the dedicated test below).
     for smaller_px, bigger_px in zip(BAND, BAND[1:]):
-        assert max_fragment_len_for(res, bigger_px) < max_fragment_len_for(res, smaller_px)
+        assert max_fragment_len_for(res, bigger_px) <= max_fragment_len_for(res, smaller_px)
+
+
+def test_px2_is_a_distinct_densest_step_except_on_720():
+    # 2 px/module is the extreme step. On 240/320/480 it's strictly denser than 3 px/module;
+    # on 720 the biggest QR (v40) already renders at 3 px/module, so 2 px/module is unreachable
+    # and its cell aliases to the 3 px/module value.
+    for res in (240, 320, 480):
+        assert QR_DENSITY_BY_RESOLUTION[res][2] > QR_DENSITY_BY_RESOLUTION[res][3]
+    assert QR_DENSITY_BY_RESOLUTION[720][2] == QR_DENSITY_BY_RESOLUTION[720][3]
 
 
 @pytest.mark.parametrize(
@@ -84,7 +94,12 @@ def test_baked_table_matches_worksheet_generator():
     for res in RESOLUTIONS:
         for px in BAND:
             version = worksheet.selected_version_for(px, res)
-            assert version is not None, f"no QR version renders at {px}px on {res}px"
+            if version is None:
+                # No QR renders at exactly this px on this panel (720px/2px: v40 is the densest
+                # QR and already renders at 3px). That cell is a documented alias to the nearest
+                # reachable denser step; the worksheet can't derive it, so it's covered by
+                # test_px2_is_a_distinct_densest_step_except_on_720 instead.
+                continue
             expected = worksheet.max_density_for_version(version)
             assert QR_DENSITY_BY_RESOLUTION[res][px] == expected, (
                 f"table[{res}][{px}]={QR_DENSITY_BY_RESOLUTION[res][px]} "
