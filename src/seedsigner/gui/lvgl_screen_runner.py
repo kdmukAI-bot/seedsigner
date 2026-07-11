@@ -147,6 +147,27 @@ class QRBrightnessEvent:
         return "QRBrightnessEvent({!r})".format(self.value)
 
 
+class QRDensityEvent:
+    """A native ``qr_density`` poll event, surfaced to the QR-display frame driver.
+
+    The native ``qr_display_screen`` emits ``("qr_density", <3..6>, "")`` on the shared poll
+    queue when the user adjusts the animated-QR density slider (only when the screen was built
+    with ``density_control``). ``_translate_event`` wraps the px/module value so the frame driver
+    can tell it apart from a button-selection index (a bare ``int``): its cue to re-split the
+    fountain at the new fragment size and persist ``SETTING__QR_DENSITY``.
+    """
+    def __init__(self, value: int):
+        self.value = value
+
+    def __eq__(self, other):
+        if other.__class__ is not self.__class__:
+            return NotImplemented
+        return self.value == other.value
+
+    def __repr__(self):
+        return "QRDensityEvent({!r})".format(self.value)
+
+
 def _translate_event(event):
     """Map an LVGL result event tuple to a SeedSigner return code.
 
@@ -156,6 +177,7 @@ def _translate_event(event):
         ("topnav_power", -1, "topnav_power")
         ("text_entered", -1, text)            # e.g. a confirmed passphrase
         ("qr_brightness", 31..255, "")        # QR-display brightness change (mid-screen)
+        ("qr_density", 3..6, "")              # QR-display density change (mid-screen)
 
     SeedSigner return codes:
         int index (0, 1, 2, ...) for button selection
@@ -163,6 +185,7 @@ def _translate_event(event):
         RET_CODE__POWER_BUTTON (1001) for power
         str text for a confirmed text-entry screen
         QRBrightnessEvent for a QR-display brightness change (not a terminal result)
+        QRDensityEvent for a QR-display density change (not a terminal result)
     """
     kind, index, label = event
     if kind == "topnav_back":
@@ -178,6 +201,10 @@ def _translate_event(event):
         # 31..255 value; without this branch it would fall through to ``return index`` and
         # be misread as a button index. The QR frame driver consumes it, not a View.
         return QRBrightnessEvent(index)
+    if kind == "qr_density":
+        # A mid-screen density change (only a density_control qr_display_screen emits this).
+        # Wrap the 3..6 px/module value so the frame driver re-splits the fountain, not a View.
+        return QRDensityEvent(index)
     return index
 
 
@@ -745,6 +772,22 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
     }
     is_animated = encoder.seq_len() > 1
 
+    # The density slider is only meaningful for a fountain encoder whose fragment size the host
+    # can vary (the animated PSBT / wallet-export flow); a fixed QR (SeedQR, xpub, address, ...)
+    # has no adjustable density. Detect that capability by duck-typing set_px_per_module (only
+    # BaseFountainQrEncoder has it); omit density_control otherwise so the native screen shows a
+    # brightness-only panel. The native screen holds no strings, so the labels are handed over
+    # already translated (mirrors brighter_text / darker_text).
+    if hasattr(encoder, "set_px_per_module"):
+        cfg["density_control"] = True
+        cfg["initial_px_per_module"] = settings.get_value(SettingsConstants.SETTING__QR_DENSITY)
+        # TRANSLATOR_NOTE: title above the animated-QR density slider
+        cfg["density_text"] = _("Density")
+        # TRANSLATOR_NOTE: label at the low-density end of the QR density slider (bigger modules, easier to scan)
+        cfg["density_min_text"] = _("Easier")
+        # TRANSLATOR_NOTE: label at the high-density end of the QR density slider (more data per frame, smaller modules)
+        cfg["density_max_text"] = _("Denser")
+
     # A QR being read is not LVGL "input activity", so the idle screensaver would otherwise
     # bounce over it. Suspend it for the screen's duration (0 disables; runtime-updatable —
     # the overlay-manager contract), then restore. Same known follow-up as run_scan_screen:
@@ -764,6 +807,13 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
                     # frames replay once the tip stows.
                     settings.set_value(SettingsConstants.SETTING__QR_BRIGHTNESS, result.value)
                     encoder.restart()
+                    continue
+                if isinstance(result, QRDensityEvent):
+                    # User adjusted density: re-split the fountain at the new px/module and
+                    # persist it. set_px_per_module rebuilds the encoder from part 0, so the
+                    # frame loop below re-pushes the new fragments from the start.
+                    encoder.set_px_per_module(result.value)
+                    settings.set_value(SettingsConstants.SETTING__QR_DENSITY, result.value)
                     continue
                 # Any other event is the user exiting the screen.
                 return result
