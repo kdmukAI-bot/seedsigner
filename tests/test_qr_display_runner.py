@@ -100,6 +100,7 @@ class _FakeSettings:
         self.values = {
             SettingsConstants.SETTING__QR_BRIGHTNESS: 128,
             SettingsConstants.SETTING__QR_BRIGHTNESS_TIPS: SettingsConstants.OPTION__ENABLED,
+            SettingsConstants.SETTING__QR_DENSITY: SettingsConstants.DENSITY__DEFAULT,
         }
         self.set_calls = []
 
@@ -188,5 +189,61 @@ def test_run_qr_display_animated_holds_when_tip_active(monkeypatch):
 
     enc = _FakeEncoder(seq_len=3)
     lvgl_screen_runner.run_qr_display_screen(enc)
+
+
+class _FakeFountainEncoder(_FakeEncoder):
+    """Density-capable stand-in: adds set_px_per_module, like BaseFountainQrEncoder, so the
+    runner offers the density control (which it duck-types on that method)."""
+    def __init__(self, seq_len=3, first="frame0"):
+        super().__init__(seq_len=seq_len, first=first)
+        self.px_per_module_calls = []
+
+    def set_px_per_module(self, px):
+        self.px_per_module_calls.append(px)
+        self._n = 0   # rebuild rewinds the fountain to part 0
+
+
+def test_run_qr_display_offers_density_control_for_fountain_encoder(monkeypatch):
+    fake_lv = MagicMock()
+    fake_lv.poll_for_result.return_value = ("topnav_back", -1, "qr_display_done")
+    fake_settings = _FakeSettings()
+    _patch_common(monkeypatch, fake_lv, fake_settings)
+
+    lvgl_screen_runner.run_qr_display_screen(_FakeFountainEncoder(seq_len=5))
+
+    cfg = fake_lv.qr_display_screen.call_args[0][0]
+    assert cfg["density_control"] is True
+    assert cfg["initial_px_per_module"] == fake_settings.values[SettingsConstants.SETTING__QR_DENSITY]
+    assert cfg["density_text"] and cfg["density_min_text"] and cfg["density_max_text"]
+
+
+def test_run_qr_display_omits_density_control_for_fixed_qr(monkeypatch):
+    fake_lv = MagicMock()
+    fake_lv.poll_for_result.return_value = ("topnav_back", -1, "qr_display_done")
+    fake_settings = _FakeSettings()
+    _patch_common(monkeypatch, fake_lv, fake_settings)
+
+    # A fixed QR (no set_px_per_module) must not offer the density control.
+    lvgl_screen_runner.run_qr_display_screen(_FakeEncoder(seq_len=1))
+
+    cfg = fake_lv.qr_display_screen.call_args[0][0]
+    assert "density_control" not in cfg
+
+
+def test_run_qr_display_density_change_resplits_and_persists(monkeypatch):
+    fake_lv = MagicMock()
+    fake_lv.poll_for_result.side_effect = [
+        ("qr_density", 3, ""),
+        ("topnav_back", -1, "qr_display_done"),
+    ]
+    fake_settings = _FakeSettings()
+    _patch_common(monkeypatch, fake_lv, fake_settings)
+
+    enc = _FakeFountainEncoder(seq_len=5)
+    lvgl_screen_runner.run_qr_display_screen(enc)
+
+    # Re-split the fountain at the new px/module and persisted it.
+    assert enc.px_per_module_calls == [3]
+    assert (SettingsConstants.SETTING__QR_DENSITY, 3) in fake_settings.set_calls
 
     fake_lv.qr_display_set_frame.assert_not_called()

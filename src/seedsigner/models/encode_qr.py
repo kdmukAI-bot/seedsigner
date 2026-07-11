@@ -330,7 +330,24 @@ class BaseFountainQrEncoder(BaseQrEncoder):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+        # The UR object (type + cbor) to fountain-encode; set by the subclass, kept so the
+        # encoder can be rebuilt when the density (px/module) changes on the live slider.
+        self._qr_ur = None
         self.ur2_encode = None
+
+
+    def _build_encoder(self):
+        """(Re)build the fountain encoder at the current qr_max_fragment_size."""
+        self.ur2_encode = UREncoder(ur=self._qr_ur, max_fragment_len=self.qr_max_fragment_size)
+
+
+    def set_px_per_module(self, px_per_module):
+        """Live-slider hook: adopt a new px/module density and re-split the fountain from part 0.
+
+        Changing px/module changes qr_max_fragment_size (the per-frame byte budget), so the whole
+        message must be re-split — restart() alone only rewinds at the current fragment size."""
+        self.qr_density = int(px_per_module)
+        self._build_encoder()
 
 
     @property
@@ -446,9 +463,8 @@ class UrXpubQrEncoder(BaseFountainQrEncoder):
         
         ur_account = Account(xd.root.my_fingerprint, ur_outputs)
 
-        qr_ur_bytes = UR("crypto-account", ur_account.to_cbor())
-
-        self.ur2_encode = UREncoder(ur=qr_ur_bytes, max_fragment_len=self.qr_max_fragment_size)
+        self._qr_ur = UR("crypto-account", ur_account.to_cbor())
+        self._build_encoder()
 
 
 
@@ -457,5 +473,5 @@ class UrPsbtQrEncoder(BaseFountainQrEncoder):
         self.psbt = psbt
         super().__init__(**kwargs)
         from urtypes.crypto import PSBT as UR_PSBT
-        qr_ur_bytes = UR("crypto-psbt", UR_PSBT(self.psbt.serialize()).to_cbor())
-        self.ur2_encode = UREncoder(ur=qr_ur_bytes, max_fragment_len=self.qr_max_fragment_size)
+        self._qr_ur = UR("crypto-psbt", UR_PSBT(self.psbt.serialize()).to_cbor())
+        self._build_encoder()
