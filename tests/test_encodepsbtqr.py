@@ -127,6 +127,26 @@ def test_qr_px_per_module_clamps_and_falls_back():
 
 
 @requires_native_ur
+def test_set_px_per_module_resplits_the_fountain():
+    # Live-slider hook: changing px/module re-derives qr_max_fragment_size and rebuilds the
+    # fountain at the new size (from part 0), so density can change mid-display.
+    mnemonic = "obscure bone gas open exotic abuse virus bunker shuffle nasty ship dash"
+    e = UrXpubQrEncoder(
+        seed=Seed(mnemonic.split(), passphrase="pass"),
+        network=SettingsConstants.MAINNET,
+        derivation="m/48h/1h/0h/2h",
+        qr_density=SettingsConstants.DENSITY__6,
+    )
+    frag_at_6 = e.qr_max_fragment_size
+
+    e.set_px_per_module(SettingsConstants.DENSITY__3)
+
+    assert e.qr_px_per_module == 3
+    assert e.qr_max_fragment_size != frag_at_6      # denser -> larger fragment budget
+    assert e.next_part().startswith("UR:CRYPTO-ACCOUNT/")
+
+
+@requires_native_ur
 def test_fountain_fragment_size_matches_active_resolution():
     """A fountain encoder's fragment size is the density-table cell for (active resolution,
     px/module) -- i.e. it wires the renderer's height and the density setting into the lookup."""
