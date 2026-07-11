@@ -317,17 +317,23 @@ class SettingsConstants:
         (CAMERA_ROTATION__270, _mft("270°")),
     ]
 
-    # QR code density: integer pixels-per-module (3-6), the readability knob for animated
+    # QR code density: integer pixels-per-module (2-6), the readability knob for animated
     # QRs. Lower number = smaller modules = more data per frame (fewer frames) but harder for
     # a camera to scan; higher number = bigger modules, easier to scan, less data per frame.
     # The per-frame byte budget is derived from this via models/qr_density.py. Stored as ints
     # (like ALL_CAMERA_ROTATIONS) so SettingsQR round-trips them; replaces the old Low/Medium/
-    # High tiers. See docs/qr-density-redesign-instructions.md.
+    # High tiers. 2 is the extreme (densest) step — the biggest QR that exists; fine on a large
+    # panel but marginal on a small one, so it stays opt-in and is never a default.
+    # See docs/qr-density-redesign-instructions.md.
+    DENSITY__2 = 2
     DENSITY__3 = 3
     DENSITY__4 = 4
     DENSITY__5 = 5
     DENSITY__6 = 6
     DENSITY__DEFAULT = DENSITY__5
+    # TRANSLATOR_NOTE: QR density option; the parenthetical warns that this densest setting is
+    # the hardest for a camera to scan (large screens only). "2" is the pixels-per-module value.
+    density_2 = _mft("2 (extreme density — hardest to scan)")
     # TRANSLATOR_NOTE: QR density option; the parenthetical warns that this densest setting is
     # harder for a camera to scan. "3" is the pixels-per-module value and is not translated.
     density_3 = _mft("3 (very high density — harder to scan)")
@@ -339,6 +345,7 @@ class SettingsConstants:
     # easier to scan but carries less data. "6" is the pixels-per-module value, not translated.
     density_6 = _mft("6 (low density — easier to scan, less data)")
     ALL_DENSITIES = [
+        (DENSITY__2, density_2),
         (DENSITY__3, density_3),
         (DENSITY__4, density_4),
         (DENSITY__5, density_5),
