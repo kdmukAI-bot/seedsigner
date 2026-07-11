@@ -7,7 +7,7 @@ from collections import namedtuple
 from embit import bip32
 from embit.networks import NETWORKS
 from embit.psbt import PSBT
-from seedsigner.helpers.ur2.ur_encoder import UREncoder
+from seedsigner.helpers.ur2.encoder import UREncoder
 from seedsigner.helpers.ur2.ur import UR
 from seedsigner.helpers.qr import QR
 from seedsigner.models.seed import Seed

@@ -5,6 +5,7 @@ import pytest
 # Must import test base before the Controller
 from base import BaseTest, FlowTest, FlowStep
 from base import FlowTestInvalidButtonDataSelectionException
+from ur_native import requires_native_ur
 
 from seedsigner.gui.screens.screen import RET_CODE__BACK_BUTTON, ButtonOption
 from seedsigner.models.settings import Settings, SettingsConstants
@@ -215,6 +216,7 @@ class TestSeedFlows(FlowTest):
         test_with_mnemonic("pioneer divide volcano art victory family grow novel mandate bicycle senior adjust".split(), expects_electrum_seed_is_valid=False)
 
 
+    @requires_native_ur
     def test_export_xpub_standard_flow(self):
         """
             Selecting "Export XPUB" from the SeedOptionsView should enter the Export XPUB flow and end at the MainMenuView
@@ -371,6 +373,7 @@ class TestSeedFlows(FlowTest):
         )
 
 
+    @requires_native_ur
     def test_export_xpub_skip_non_option_flow(self):
         """
             Export XPUB flows w/o user choices when no other options for sig_types, script_types, and/or xpub_qr_formats
@@ -402,6 +405,7 @@ class TestSeedFlows(FlowTest):
         )
 
 
+    @requires_native_ur
     def test_export_xpub_electrum_seed_flow(self):
         """
             Electrum seeds should skip script type selection
@@ -455,6 +459,7 @@ class TestSeedFlows(FlowTest):
         )
 
 
+    @requires_native_ur
     def test_transcribe_seedqr_and_verify(self):
         """
         """
