@@ -41,6 +41,8 @@ class ScanView(View):
 
 
     def run(self):
+        from seedsigner.gui.lvgl_screen_runner import camera_preview_lvgl_available
+
         if IS_MICROPYTHON:
             # Native camera scan (ESP32): the native camera_scanner module owns the
             # live preview + overlay; run_scan_screen drives DecodeQR and returns a
@@ -55,9 +57,31 @@ class ScanView(View):
                 return Destination(ScanCameraErrorView)
             if result.cancelled:
                 return Destination(BackStackView)
+        elif camera_preview_lvgl_available():
+            # CPython / Pi Zero, native camera-preview build present: render the live
+            # preview + QR-scan overlay through LVGL (blended display) while picamera
+            # capture + DecodeQR decode stay in Python. Same shape as the MicroPython
+            # branch; the PIL ScanScreen below remains the fallback (dev/CI, or a .so
+            # that predates the binding).
+            from seedsigner.gui.lvgl_screen_runner import run_camera_preview_scan
+
+            # The overlay's hardware-mode bottom line; compose it the same way the PIL
+            # ScanScreen does ("< back  |  <instructions>"), already localized.
+            instructions = "< " + _("back") + "  |  " + _(self.instructions_text)
+            result = run_camera_preview_scan(self.decoder, instructions_text=instructions)
+            if result is None:
+                # Camera bring-up failed; recover to a notice + the menu, like the
+                # MicroPython path, rather than crashing.
+                return Destination(ScanCameraErrorView)
+            if result.cancelled:
+                return Destination(BackStackView)
+
+            # A long scan might have exceeded the screensaver timeout; ensure the
+            # screensaver doesn't immediately engage when we leave here.
+            self.controller.reset_screensaver_timeout()
         else:
-            # CPython / Pi Zero: the PIL live-preview screen (blended display), kept
-            # until the Pi camera preview moves to native at the PIL cutover.
+            # CPython / Pi Zero fallback: the PIL live-preview screen (blended display),
+            # used when the native camera-preview build isn't present.
             from seedsigner.gui.screens.scan_screens import ScanScreen
 
             # Start the live preview and background QR reading
