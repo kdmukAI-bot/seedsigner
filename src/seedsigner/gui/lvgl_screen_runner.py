@@ -707,6 +707,196 @@ def run_scan_screen(decoder, *, allow_screensaver=False):
             _lv.set_screensaver_timeout(_screensaver_timeout_ms)
 
 
+def camera_preview_lvgl_available():
+    """True if the native runtime exposes the Pi camera-preview scan surface.
+
+    A lightweight, side-effect-free capability probe (imports the module but does NOT
+    initialize the runtime): the ScanView gate calls it to pick the LVGL live-preview
+    scan over the legacy PIL ScanScreen. False on dev/CI (no native module) and against
+    an older ``.so`` that predates the ``camera_preview_screen`` binding, so both keep
+    the PIL fallback. The dual name mirrors ``ensure_lvgl_runtime`` (the ESP32 firmware
+    still registers the pre-rename module)."""
+    try:
+        import seedsigner_lvgl_screens as lv
+    except ImportError:
+        try:
+            import seedsigner_lvgl as lv
+        except ImportError:
+            return False
+    return hasattr(lv, "camera_preview_screen")
+
+
+def _numpy_rgb_to_rgb565(frame, rotation):
+    """Convert one picamera numpy frame to a 240x240 LVGL-native RGB565 byte string.
+
+    ``frame`` is HxWx3 uint8 RGB straight from ``Camera.read_video_stream()`` (the same
+    array fed to ``DecodeQR.add_image`` — decode gets the full-res original; this only
+    touches a downscaled copy for the *preview*). Pipeline mirrors the PIL preview's
+    geometry: stride-2 nearest downscale 480->240 (square, so fill == plain 2x), then a
+    ``90 + camera_rotation`` degree CCW rotation (``Image.rotate`` parity via ``np.rot90``).
+
+    Output is little-endian RGB565, w*h*2 bytes, NEVER pre-swapped for the panel — the
+    Stage-1 contract locked on-hardware. The active flush driver (python flush ->
+    ST7789.py, native flush -> display_st7789.cpp) owns panel byte-order/BGR, so feeding
+    LVGL-native keeps this flush-mode-agnostic (survives the display-driver cutover)."""
+    import numpy as np
+
+    # Stride-2 nearest downscale (480x480 -> 240x240). Both are square, so the PIL
+    # path's resize_image_to_fill is a plain 2x decimation with no aspect crop.
+    small = frame[::2, ::2]
+    # 90 + camera_rotation degrees CCW; camera_rotation is always a multiple of 90.
+    k = ((90 + int(rotation)) // 90) % 4
+    if k:
+        small = np.rot90(small, k)
+    r = (small[:, :, 0].astype(np.uint16) & 0xF8) << 8   # RRRRR000 -> bits 15..11
+    g = (small[:, :, 1].astype(np.uint16) & 0xFC) << 3   # GGGGGG00 -> bits 10..5
+    b = (small[:, :, 2].astype(np.uint16) >> 3)          # BBBBB    -> bits 4..0
+    rgb565 = r | g | b
+    # ascontiguousarray: np.rot90 returns a non-contiguous view; tobytes() copies in C
+    # order regardless, but be explicit. Native (little-endian on the ARM Pi) byte order
+    # is exactly the LVGL-native RGB565 the sink expects.
+    return np.ascontiguousarray(rgb565).tobytes()
+
+
+def run_camera_preview_scan(decoder, *, instructions_text=None, allow_screensaver=False):
+    """Drive the Pi Zero LVGL camera-preview scan for a ScanView (CPython / blended display).
+
+    The CPython analog of ``run_scan_screen``: instead of a native camera pipeline, the Pi
+    captures frames with picamera and decodes them with ``DecodeQR`` in Python (unchanged),
+    while the live preview + QR-scan overlay render through the native
+    ``camera_preview_screen`` pixel sink. Per iteration: read one numpy frame, decode it,
+    convert a copy to LVGL-native RGB565, push it + a progress update to the overlay, and
+    pump LVGL — all panel writes under ``renderer.lock`` (single writer, blended-display
+    discipline; the capture itself is backgrounded by ``PiVideoStream``).
+
+    User cancel is joystick LEFT / RIGHT read via ``HardwareButtons`` — the host wiring the
+    overlay's hardware-mode back affordance ("< back", per camera_preview_overlay.h), and
+    identical to the legacy PIL ScanScreen. The overlay is passive chrome, so nothing on the
+    LVGL side produces a back event on the Pi.
+
+    Returns a ``ScanResult`` (the caller reads ``decoder`` + ``result.cancelled`` to route),
+    or ``None`` if the camera failed to start so the caller recovers to a notice like the
+    MicroPython path. Post display-driver cutover this converges with ``run_scan_screen`` on
+    one drive loop (``scan_consumer.run_scan``); today the Pi keeps its own Python decode."""
+    ensure_lvgl_runtime()
+    # A fire-and-forget loading spinner (e.g. from the launching view) leaves a CPython
+    # pump thread running; stop it so it can't pump LVGL concurrently with our scan pump
+    # (both under renderer.lock, but they'd fight over the active screen). No-op if idle.
+    stop_loading_pump()
+    import time
+    from seedsigner.gui.renderer import Renderer
+    from seedsigner.hardware.buttons import HardwareButtons, HardwareButtonsConstants
+    from seedsigner.hardware.camera import Camera, CameraConnectionError
+    from seedsigner.hardware.scan_consumer import ScanResult
+    from seedsigner.models.decode_qr import DecodeQRStatus
+
+    # DecodeQRStatus -> overlay frame_status (0 none / 1 added / 2 repeated / 3 miss),
+    # matching camera_preview_set_progress's contract and Python ScanScreen.FRAME__*.
+    _FRAME_STATUS = {
+        DecodeQRStatus.PART_COMPLETE: 1,   # new part -> green dot
+        DecodeQRStatus.PART_EXISTING: 2,   # already seen -> gray dot
+        DecodeQRStatus.FALSE: 3,           # nothing decoded -> dot hidden
+    }
+
+    renderer = Renderer.get_instance()
+    hw = HardwareButtons.get_instance()
+    camera = Camera.get_instance()
+
+    # Same capture profile as the PIL ScanScreen (locked for decode reliability): 480x480
+    # @ ~6fps, RGB. read_video_stream() returns the raw numpy frame decode expects.
+    try:
+        camera.start_video_stream_mode(resolution=(480, 480), framerate=6, format="rgb")
+    except CameraConnectionError as e:
+        logger.error("camera start failed for LVGL scan: %r", e)
+        return None
+
+    cancelled = False
+    complete = False
+    max_pct = 0
+    try:
+        # A camera preview isn't LVGL "input activity", so suspend the idle screensaver for
+        # the scan (0 disables; runtime-updatable), then restore in finally — same as
+        # run_scan_screen. The screen also carries SS_OBJ_FLAG_NO_SCREENSAVER, and
+        # camera_preview_close() resets the idle clock so the next screen still gets a full
+        # saver window. Inside the try so the camera-stop finally always runs once started.
+        if not allow_screensaver:
+            _lv.set_screensaver_timeout(0)
+
+        # Build the preview screen + wire the blended-display flush under the lock (mirrors
+        # run_lvgl_screen), then paint the first frame (black sink + instruction overlay).
+        with renderer.lock:
+            _lv.set_flush_mode("python")
+            _lv.set_flush_callback(_make_flush_callback(renderer.disp))
+            _lv.clear_result_queue()
+            cfg = {"allow_screensaver": allow_screensaver}
+            if instructions_text:
+                cfg["instructions_text"] = instructions_text
+            _lv.camera_preview_screen(cfg)
+            _lv.lvgl_pump(5, 1)
+
+        while True:
+            # Cancel: joystick LEFT / RIGHT (host-wired back), identical to PIL ScanScreen.
+            if hw.check_for_low(keys=[HardwareButtonsConstants.KEY_LEFT,
+                                      HardwareButtonsConstants.KEY_RIGHT]):
+                cancelled = True
+                break
+
+            frame = camera.read_video_stream()
+            if frame is None:
+                # Camera still warming up: keep the overlay animating, don't decode None.
+                with renderer.lock:
+                    _lv.lvgl_pump(5, 1)
+                time.sleep(0.01)
+                continue
+
+            status = decoder.add_image(frame)
+
+            if status in (DecodeQRStatus.COMPLETE, DecodeQRStatus.INVALID):
+                complete = status == DecodeQRStatus.COMPLETE
+                with renderer.lock:
+                    if complete:
+                        # Snap the bar to full + green as a confirmation beat before teardown.
+                        _lv.camera_preview_set_progress(100, 1)
+                    _lv.lvgl_pump(5, 1)
+                break
+
+            # Monotonic progress (the weighted estimate can momentarily dip; the PIL path
+            # uses the same weighted percent for the bar).
+            pct = decoder.get_percent_complete(weight_mixed_frames=True)
+            if pct < max_pct:
+                pct = max_pct
+            else:
+                max_pct = pct
+
+            rgb565 = _numpy_rgb_to_rgb565(frame, camera._camera_rotation)
+
+            with renderer.lock:
+                _lv.camera_preview_set_frame(rgb565)
+                # Only raise the status bar once there's real progress; until then the
+                # overlay stays on the instruction text (PIL parity: instructions while 0%,
+                # progress bar + status dot once decoding). set_progress implies scanning.
+                if pct > 0:
+                    _lv.camera_preview_set_progress(pct, _FRAME_STATUS.get(status, 0))
+                _lv.lvgl_pump(5, 1)
+
+            if camera._video_stream is None:
+                # Stream torn down out from under us (defensive; matches PIL ScanScreen).
+                break
+    finally:
+        camera.stop_video_stream_mode()
+        with renderer.lock:
+            _lv.camera_preview_close()
+            _lv.set_flush_callback(None)
+        if not allow_screensaver:
+            _lv.set_screensaver_timeout(_screensaver_timeout_ms)
+        # Reset the PIL-side input timer so returning to a PIL screen doesn't immediately
+        # re-trigger the PIL screensaver (mirrors run_lvgl_screen's poll-side reset).
+        hw.update_last_input_time()
+
+    reason = "complete" if complete else ("cancelled" if cancelled else "invalid")
+    return ScanResult(decoder, complete, cancelled, reason, polls=0, dropped_new=0)
+
+
 def _qr_frame_bytes(part):
     """The payload bytes for ``qr_display_set_frame`` (the native screen re-encodes them
     into a QR). Animated parts are UR / Specter strings -> UTF-8; bytes pass through."""
