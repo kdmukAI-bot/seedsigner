@@ -1,12 +1,15 @@
 """Unit tests for the Pi Zero LVGL camera-preview scan (run_camera_preview_scan) and its
 numpy->RGB565 conversion.
 
-Off-device: the native runtime, renderer, picamera, and hardware buttons are mocked, so
-what's under test is the drive-loop logic — frame push, DecodeQRStatus->overlay-status
-mapping, monotonic progress, completion, cancel, and teardown. The real QR decode + visual
-preview are validated on-device (Stage 2 hardware validation), not here.
+Off-device: the native runtime, renderer, picamera, and hardware buttons are mocked. Under test:
+(1) the numpy->RGB565 conversion, (2) the _CameraScanDecodeThread decode worker (driven
+synchronously for determinism), and (3) run_camera_preview_scan's OUTCOMES (build/complete/cancel/
+teardown). The runner is now two-threaded (a background decode worker + a preview loop), so exact
+per-frame call counts are nondeterministic; the tests assert observable outcomes, not cadence. Real
+decode + visual preview are validated on-device.
 """
 import sys
+import time
 import types
 from unittest.mock import MagicMock
 
@@ -75,19 +78,73 @@ def test_camera_preview_lvgl_available_false_without_native_module():
     assert runner.camera_preview_lvgl_available() is False
 
 
-# --- drive loop ---------------------------------------------------------------
+# --- _CameraScanDecodeThread (driven synchronously for determinism) -----------
+
+def _decoder(statuses, percents):
+    d = MagicMock()
+    d.add_image.side_effect = list(statuses)
+    d.get_percent_complete.side_effect = list(percents)
+    return d
+
+
+def test_decode_thread_reaches_complete():
+    """A miss, a part, then completion: run() returns on COMPLETE with the terminal flags set
+    and the monotonic percent latched."""
+    camera = MagicMock()
+    camera.read_video_stream.return_value = object()
+    d = _decoder([DecodeQRStatus.FALSE, DecodeQRStatus.PART_COMPLETE, DecodeQRStatus.COMPLETE],
+                 [0, 40, 100])
+    t = runner._CameraScanDecodeThread(camera, d)
+    t.keep_running = True
+    t.run()  # synchronous — returns when COMPLETE reached
+    assert t.done is True
+    assert t.complete is True
+    assert t.status == DecodeQRStatus.COMPLETE
+    assert t.percent == 100
+
+
+def test_decode_thread_invalid_is_terminal_but_not_complete():
+    camera = MagicMock()
+    camera.read_video_stream.return_value = object()
+    d = _decoder([DecodeQRStatus.INVALID], [0])
+    t = runner._CameraScanDecodeThread(camera, d)
+    t.keep_running = True
+    t.run()
+    # INVALID ends the scan (done) but is not a successful decode (complete=False); the
+    # caller distinguishes COMPLETE vs INVALID off the decoder itself.
+    assert t.done is True
+    assert t.complete is False
+    assert t.status == DecodeQRStatus.INVALID
+
+
+def test_decode_thread_percent_is_monotonic():
+    """A dipping weighted estimate never lowers the reported percent."""
+    camera = MagicMock()
+    camera.read_video_stream.return_value = object()
+    # frame2's 20 is below frame1's 40 -> must clamp to 40; frame3 completes at 100.
+    d = _decoder([DecodeQRStatus.PART_COMPLETE, DecodeQRStatus.PART_COMPLETE, DecodeQRStatus.COMPLETE],
+                 [40, 20, 100])
+    t = runner._CameraScanDecodeThread(camera, d)
+    t.keep_running = True
+    t.run()
+    assert t._max_pct == 100
+    assert t.percent == 100  # never regressed below 40 en route
+
+
+# --- run_camera_preview_scan (outcomes; two-threaded so counts are nondeterministic) --
 
 @pytest.fixture
 def scan_env(monkeypatch):
     """Stub the native runtime + renderer + picamera + buttons for run_camera_preview_scan.
 
-    Returns a namespace: `lv` (fake native module), `hw` (buttons), `camera`, and
-    `make_decoder(statuses, percents)`. Tests configure the decode script + cancel state.
-
-    The numpy->RGB565 conversion is patched out (covered separately by the conversion
-    tests), so the loop-logic tests need no real numpy and run on dev/CI where numpy is
-    the tests/base.py mock — a captured frame is an opaque sentinel the loop only forwards.
+    The numpy->RGB565 conversion is patched out (covered by the conversion tests), so the loop
+    tests need no real numpy. `make_decoder`'s add_image simulates a short decode and never
+    raises on overrun (the background thread may call it many times), so completion is driven by
+    the scripted status sequence. time.sleep is capped so the two threads interleave quickly.
     """
+    real_sleep = time.sleep
+    monkeypatch.setattr("time.sleep", lambda s=0: real_sleep(min(s, 0.005)))
+
     fake_lv = MagicMock()
     monkeypatch.setattr(runner, "_lv", fake_lv)
     monkeypatch.setattr(runner, "ensure_lvgl_runtime", lambda: None)
@@ -95,17 +152,12 @@ def scan_env(monkeypatch):
     monkeypatch.setattr(runner, "_screensaver_timeout_ms", 60000)
     monkeypatch.setattr(runner, "_numpy_rgb_to_rgb565",
                         lambda frame, rotation: b"\x00" * (240 * 240 * 2))
-    monkeypatch.setattr("time.sleep", lambda *a: None)
 
-    # Renderer.get_instance() (real module would init the ST7789 driver) -> mock; its
-    # .lock is a context manager (MagicMock supports `with`).
     renderer = MagicMock()
     monkeypatch.setitem(
         sys.modules, "seedsigner.gui.renderer",
         types.SimpleNamespace(Renderer=MagicMock(get_instance=lambda: renderer)))
 
-    # picamera-backed Camera -> mock. CameraConnectionError must stay a real exception
-    # class (the runner catches it). _video_stream truthy so the defensive break is inert.
     class CameraConnectionError(Exception):
         pass
 
@@ -126,70 +178,65 @@ def scan_env(monkeypatch):
             HardwareButtons=MagicMock(get_instance=lambda: hw),
             HardwareButtonsConstants=types.SimpleNamespace(KEY_LEFT=3, KEY_RIGHT=15)))
 
-    def make_decoder(statuses, percents):
+    def make_decoder(statuses):
+        seq = list(statuses)
+        box = {"i": 0}
         decoder = MagicMock()
-        decoder.add_image.side_effect = list(statuses)
-        decoder.get_percent_complete.side_effect = list(percents)
+
+        def add_image(_img):
+            time.sleep(0.002)  # simulate a short decode; tame the background hot-loop
+            i = box["i"]
+            box["i"] = i + 1
+            return seq[i] if i < len(seq) else (seq[-1] if seq else DecodeQRStatus.FALSE)
+
+        decoder.add_image.side_effect = add_image
+        decoder.get_percent_complete.side_effect = lambda **k: 40
         return decoder
 
-    return types.SimpleNamespace(lv=fake_lv, hw=hw, camera=camera,
-                                 renderer=renderer, make_decoder=make_decoder,
-                                 CameraConnectionError=CameraConnectionError)
+    return types.SimpleNamespace(lv=fake_lv, hw=hw, camera=camera, renderer=renderer,
+                                 make_decoder=make_decoder, CameraConnectionError=CameraConnectionError)
 
 
 def test_run_camera_preview_scan_completes(scan_env):
-    """A miss, then a part, then completion: pushes frames, maps the part to a green-dot
-    status, snaps to 100 on complete, closes, and returns a complete ScanResult."""
+    """Background decode reaches COMPLETE: the screen is built with the composed instruction
+    line, a frame is pushed, the bar snaps to full, teardown runs, and a complete ScanResult
+    is returned."""
     decoder = scan_env.make_decoder(
-        statuses=[DecodeQRStatus.FALSE, DecodeQRStatus.PART_COMPLETE, DecodeQRStatus.COMPLETE],
-        percents=[0, 40])  # one get_percent_complete per non-terminal frame
+        [DecodeQRStatus.FALSE, DecodeQRStatus.PART_COMPLETE, DecodeQRStatus.COMPLETE])
 
     result = runner.run_camera_preview_scan(decoder, instructions_text="< back  |  Scan a QR code")
 
     lv = scan_env.lv
-    # Screen built once, with the composed instruction line.
     lv.camera_preview_screen.assert_called_once()
     assert lv.camera_preview_screen.call_args[0][0]["instructions_text"] == "< back  |  Scan a QR code"
-    # A frame is pushed for the miss and the part (not on the terminal COMPLETE frame).
-    assert lv.camera_preview_set_frame.call_count == 2
-    # Progress only once there's real progress: (40, added) for the part, (100, added) on complete.
-    progress_calls = [c.args for c in lv.camera_preview_set_progress.call_args_list]
-    assert (40, 1) in progress_calls
-    assert (100, 1) in progress_calls
-    assert (0, 3) not in progress_calls  # the 0% miss stays on instructions, no bar
+    assert lv.camera_preview_set_frame.called          # preview rendered at least once
+    assert (100, 1) in [c.args for c in lv.camera_preview_set_progress.call_args_list]  # completion beat
     lv.camera_preview_close.assert_called_once()
-    lv.set_flush_callback.assert_called_with(None)  # dropped on teardown
+    lv.set_flush_callback.assert_called_with(None)     # dropped on teardown
+    scan_env.camera.stop_video_stream_mode.assert_called_once()
+    assert decoder.add_image.called                     # decode ran off-thread
     assert result.complete is True
     assert result.cancelled is False
 
 
-def test_run_camera_preview_scan_maps_repeated_part_to_gray(scan_env):
-    """A PART_EXISTING (already-seen) frame maps to overlay status 2 (gray dot)."""
-    decoder = scan_env.make_decoder(
-        statuses=[DecodeQRStatus.PART_EXISTING, DecodeQRStatus.COMPLETE],
-        percents=[25])
-    runner.run_camera_preview_scan(decoder)
-    progress_calls = [c.args for c in scan_env.lv.camera_preview_set_progress.call_args_list]
-    assert (25, 2) in progress_calls
-
-
 def test_run_camera_preview_scan_cancel_via_hardware_back(scan_env):
-    """Joystick LEFT/RIGHT (check_for_low True) cancels before any decode; still tears down."""
+    """Joystick LEFT/RIGHT (check_for_low True) cancels; the decode thread is stopped and
+    teardown still runs."""
     scan_env.hw.check_for_low.return_value = True
-    decoder = scan_env.make_decoder(statuses=[], percents=[])
+    decoder = scan_env.make_decoder([DecodeQRStatus.FALSE])  # never completes on its own
 
     result = runner.run_camera_preview_scan(decoder)
 
     assert result.cancelled is True
     assert result.complete is False
-    decoder.add_image.assert_not_called()          # cancelled before reading a frame
     scan_env.lv.camera_preview_close.assert_called_once()
     scan_env.camera.stop_video_stream_mode.assert_called_once()
 
 
 def test_run_camera_preview_scan_returns_none_on_camera_failure(scan_env):
-    """Camera bring-up failure -> None so ScanView routes to ScanCameraErrorView."""
+    """Camera bring-up failure -> None so ScanView routes to ScanCameraErrorView; the decode
+    thread is never started."""
     scan_env.camera.start_video_stream_mode.side_effect = scan_env.CameraConnectionError()
-    result = runner.run_camera_preview_scan(scan_env.make_decoder([], []))
+    result = runner.run_camera_preview_scan(scan_env.make_decoder([]))
     assert result is None
     scan_env.lv.camera_preview_screen.assert_not_called()  # never got to build

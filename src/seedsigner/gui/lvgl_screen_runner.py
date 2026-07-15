@@ -827,30 +827,79 @@ def _numpy_rgb_to_rgb565(frame, rotation):
     return np.ascontiguousarray(rgb565).tobytes()
 
 
+class _CameraScanDecodeThread(BaseThread):
+    """Camera-scan decode worker: runs ``DecodeQR.add_image()`` on a dedicated thread.
+
+    Decode is the heavy, variable-latency step — the zbar scan runs ~100-200 ms and jitters with
+    frame content. Running it on its own thread lets the preview loop push frames and pump LVGL
+    at a steady, camera-rate cadence independent of decode time, and keeps every native-LVGL call
+    on a single thread: this worker touches only ``decoder`` (pyzbar + the UR assembler), never
+    LVGL. pyzbar reaches libzbar through ctypes, which releases the GIL for the scan, so on the
+    single-core Pi the preview loop keeps running while a decode is in flight.
+
+    Cross-thread state is plain scalars (single reads/writes are GIL-atomic). The main thread
+    only READS ``percent`` / ``status`` / ``done`` / ``complete``; this worker is the sole caller
+    of ``decoder`` methods, so ``DecodeQR`` is never accessed concurrently. The main thread reads
+    the decoder object itself only after this worker has stopped (the runner's ``finally`` waits
+    for it)."""
+    def __init__(self, camera, decoder):
+        super().__init__()
+        self.camera = camera
+        self.decoder = decoder
+        self.status = None        # last DecodeQRStatus -> drives the overlay dot
+        self.percent = 0          # monotonic-clamped scan progress -> drives the bar
+        self.complete = False     # a COMPLETE (not INVALID) decode was reached
+        self.done = False         # terminal (COMPLETE or INVALID) -> main loop exits
+        self._max_pct = 0
+
+    def run(self):
+        import time
+        from seedsigner.models.decode_qr import DecodeQRStatus
+        while self.keep_running:
+            frame = self.camera.read_video_stream()
+            if frame is None:
+                time.sleep(0.005)
+                continue
+            status = self.decoder.add_image(frame)
+            # Monotonic progress: the weighted estimate can momentarily dip, so never lower it.
+            try:
+                pct = self.decoder.get_percent_complete(weight_mixed_frames=True)
+            except Exception:
+                pct = self._max_pct
+            if pct < self._max_pct:
+                pct = self._max_pct
+            else:
+                self._max_pct = pct
+            self.percent = pct
+            self.status = status
+            if status in (DecodeQRStatus.COMPLETE, DecodeQRStatus.INVALID):
+                # Either terminal state ends the scan; the caller routes COMPLETE vs INVALID
+                # off the decoder object.
+                self.complete = status == DecodeQRStatus.COMPLETE
+                self.done = True
+                return
+
+
 def run_camera_preview_scan(decoder, *, instructions_text=None, allow_screensaver=False):
-    """Drive the Pi Zero LVGL camera-preview scan for a ScanView (CPython / blended display).
+    """Drive the Pi Zero LVGL camera-preview scan for a ScanView.
 
-    The CPython analog of ``run_scan_screen``: instead of a native camera pipeline, the Pi
-    captures frames with picamera and decodes them with ``DecodeQR`` in Python (unchanged),
-    while the live preview + QR-scan overlay render through the native
-    ``camera_preview_screen`` pixel sink. Per iteration: read one numpy frame, decode it,
-    convert a copy to LVGL-native RGB565, push it + a progress update to the overlay, and
-    pump LVGL — all panel writes under ``renderer.lock`` (single writer, blended-display
-    discipline; the capture itself is backgrounded by ``PiVideoStream``).
+    The Pi captures frames with picamera and decodes them with ``DecodeQR``; the live preview +
+    QR-scan overlay render through the native ``camera_preview_screen`` pixel sink. Two threads:
+    a background ``_CameraScanDecodeThread`` runs the QR decode, and this main loop renders the
+    preview (numpy -> RGB565 -> ``set_frame``) + overlay progress and pumps LVGL under
+    ``renderer.lock`` at a steady ~camera-rate cadence. The per-frame sleep up to
+    ``PREVIEW_INTERVAL`` yields the single core to the decode thread.
 
-    User cancel is joystick LEFT / RIGHT read via ``HardwareButtons`` — the host wiring the
-    overlay's hardware-mode back affordance ("< back", per camera_preview_overlay.h), and
-    identical to the legacy PIL ScanScreen. The overlay is passive chrome, so nothing on the
-    LVGL side produces a back event on the Pi.
+    Cancel is joystick LEFT / RIGHT via ``HardwareButtons``: the overlay is passive chrome (in
+    hardware mode it shows a "< back" instruction line, per camera_preview_overlay.h), so the
+    host owns the back affordance; nothing on the LVGL side emits a back event.
 
-    Returns a ``ScanResult`` (the caller reads ``decoder`` + ``result.cancelled`` to route),
-    or ``None`` if the camera failed to start so the caller recovers to a notice like the
-    MicroPython path. Post display-driver cutover this converges with ``run_scan_screen`` on
-    one drive loop (``scan_consumer.run_scan``); today the Pi keeps its own Python decode."""
+    Returns a ``ScanResult`` (the caller reads ``decoder`` + ``result.cancelled`` to route), or
+    ``None`` if the camera fails to start so the caller can recover to a notice."""
     ensure_lvgl_runtime()
-    # A fire-and-forget loading spinner (e.g. from the launching view) leaves a CPython
-    # pump thread running; stop it so it can't pump LVGL concurrently with our scan pump
-    # (both under renderer.lock, but they'd fight over the active screen). No-op if idle.
+    # A fire-and-forget loading spinner (e.g. from the launching view) leaves a pump thread
+    # running; stop it so it can't pump LVGL concurrently with this scan's pump (they'd fight
+    # over the active screen). No-op if idle.
     stop_loading_pump()
     import time
     from seedsigner.gui.renderer import Renderer
@@ -859,8 +908,7 @@ def run_camera_preview_scan(decoder, *, instructions_text=None, allow_screensave
     from seedsigner.hardware.scan_consumer import ScanResult
     from seedsigner.models.decode_qr import DecodeQRStatus
 
-    # DecodeQRStatus -> overlay frame_status (0 none / 1 added / 2 repeated / 3 miss),
-    # matching camera_preview_set_progress's contract and Python ScanScreen.FRAME__*.
+    # DecodeQRStatus -> overlay frame_status per camera_preview_set_progress's contract.
     _FRAME_STATUS = {
         DecodeQRStatus.PART_COMPLETE: 1,   # new part -> green dot
         DecodeQRStatus.PART_EXISTING: 2,   # already seen -> gray dot
@@ -871,28 +919,33 @@ def run_camera_preview_scan(decoder, *, instructions_text=None, allow_screensave
     hw = HardwareButtons.get_instance()
     camera = Camera.get_instance()
 
-    # Same capture profile as the PIL ScanScreen (locked for decode reliability): 480x480
-    # @ ~6fps, RGB. read_video_stream() returns the raw numpy frame decode expects.
+    # 480x480 @ ~6fps RGB — the capture profile decode reliability is tuned for.
+    # read_video_stream() returns the raw numpy frame the decoder expects.
     try:
         camera.start_video_stream_mode(resolution=(480, 480), framerate=6, format="rgb")
     except CameraConnectionError as e:
         logger.error("camera start failed for LVGL scan: %r", e)
         return None
 
+    # Steady preview-cadence target (~camera rate). The per-frame sleep up to this interval is
+    # what hands the single core to the decode thread: too short starves decode, too long makes
+    # the preview lag the camera.
+    PREVIEW_INTERVAL = 0.15
+
     cancelled = False
     complete = False
-    max_pct = 0
+    decode_thread = None
     try:
-        # A camera preview isn't LVGL "input activity", so suspend the idle screensaver for
-        # the scan (0 disables; runtime-updatable), then restore in finally — same as
-        # run_scan_screen. The screen also carries SS_OBJ_FLAG_NO_SCREENSAVER, and
-        # camera_preview_close() resets the idle clock so the next screen still gets a full
-        # saver window. Inside the try so the camera-stop finally always runs once started.
+        # A live preview isn't LVGL "input activity", so suspend the idle screensaver for the
+        # scan (0 disables; runtime-updatable), then restore in finally. The screen also carries
+        # SS_OBJ_FLAG_NO_SCREENSAVER, and camera_preview_close() resets the idle clock so the next
+        # screen still gets a full saver window. Inside the try so the camera-stop finally always
+        # runs once the camera has started.
         if not allow_screensaver:
             _lv.set_screensaver_timeout(0)
 
-        # Build the preview screen + wire the blended-display flush under the lock (mirrors
-        # run_lvgl_screen), then paint the first frame (black sink + instruction overlay).
+        # Build the preview screen + install the flush callback under the lock, then paint the
+        # first frame (black sink + instruction overlay).
         with renderer.lock:
             _lv.set_flush_mode("python")
             _lv.set_flush_callback(_make_flush_callback(renderer.disp))
@@ -903,63 +956,67 @@ def run_camera_preview_scan(decoder, *, instructions_text=None, allow_screensave
             _lv.camera_preview_screen(cfg)
             _lv.lvgl_pump(5, 1)
 
-        while True:
-            # Cancel: joystick LEFT / RIGHT (host-wired back), identical to PIL ScanScreen.
+        # Decode runs on the worker thread; this loop renders the preview, pumps LVGL, reads cancel.
+        decode_thread = _CameraScanDecodeThread(camera, decoder)
+        decode_thread.start()
+
+        while not decode_thread.done:
+            t_start = time.monotonic()
+
+            # Cancel: joystick LEFT / RIGHT (the host-wired back affordance).
             if hw.check_for_low(keys=[HardwareButtonsConstants.KEY_LEFT,
                                       HardwareButtonsConstants.KEY_RIGHT]):
                 cancelled = True
                 break
 
             frame = camera.read_video_stream()
-            if frame is None:
-                # Camera still warming up: keep the overlay animating, don't decode None.
+            if frame is not None:
+                # Snapshot the decode thread's latest progress (plain scalar reads).
+                pct = decode_thread.percent
+                fs = _FRAME_STATUS.get(decode_thread.status, 0)
+                rgb565 = _numpy_rgb_to_rgb565(frame, camera._camera_rotation)
                 with renderer.lock:
+                    _lv.camera_preview_set_frame(rgb565)
+                    # Keep the instruction line until there's real progress; once decoding,
+                    # set_progress raises the bar + status dot (and implies scanning).
+                    if pct > 0:
+                        _lv.camera_preview_set_progress(pct, fs)
                     _lv.lvgl_pump(5, 1)
-                time.sleep(0.01)
-                continue
-
-            status = decoder.add_image(frame)
-
-            if status in (DecodeQRStatus.COMPLETE, DecodeQRStatus.INVALID):
-                complete = status == DecodeQRStatus.COMPLETE
-                with renderer.lock:
-                    if complete:
-                        # Snap the bar to full + green as a confirmation beat before teardown.
-                        _lv.camera_preview_set_progress(100, 1)
-                    _lv.lvgl_pump(5, 1)
-                break
-
-            # Monotonic progress (the weighted estimate can momentarily dip; the PIL path
-            # uses the same weighted percent for the bar).
-            pct = decoder.get_percent_complete(weight_mixed_frames=True)
-            if pct < max_pct:
-                pct = max_pct
             else:
-                max_pct = pct
-
-            rgb565 = _numpy_rgb_to_rgb565(frame, camera._camera_rotation)
-
-            with renderer.lock:
-                _lv.camera_preview_set_frame(rgb565)
-                # Only raise the status bar once there's real progress; until then the
-                # overlay stays on the instruction text (PIL parity: instructions while 0%,
-                # progress bar + status dot once decoding). set_progress implies scanning.
-                if pct > 0:
-                    _lv.camera_preview_set_progress(pct, _FRAME_STATUS.get(status, 0))
-                _lv.lvgl_pump(5, 1)
+                # Camera still warming up: keep the overlay animating, don't render a None frame.
+                with renderer.lock:
+                    _lv.lvgl_pump(5, 1)
 
             if camera._video_stream is None:
-                # Stream torn down out from under us (defensive; matches PIL ScanScreen).
+                # Stream torn down out from under us (defensive).
                 break
+
+            # Pace to ~camera rate; the sleep hands the core to the decode thread.
+            time.sleep(max(0.0, PREVIEW_INTERVAL - (time.monotonic() - t_start)))
+
+        complete = decode_thread.complete
+        if complete:
+            # Snap the bar to full + green as a confirmation beat before teardown.
+            with renderer.lock:
+                _lv.camera_preview_set_progress(100, 1)
+                _lv.lvgl_pump(5, 1)
     finally:
+        if decode_thread is not None:
+            decode_thread.stop()
+            # Bounded wait for the in-flight add_image() to finish (the compat.threading Thread
+            # has no join()) so the decoder is quiescent before we read it below.
+            for _ in range(80):
+                if not decode_thread.is_alive():
+                    break
+                time.sleep(0.01)
         camera.stop_video_stream_mode()
         with renderer.lock:
             _lv.camera_preview_close()
             _lv.set_flush_callback(None)
         if not allow_screensaver:
             _lv.set_screensaver_timeout(_screensaver_timeout_ms)
-        # Reset the PIL-side input timer so returning to a PIL screen doesn't immediately
-        # re-trigger the PIL screensaver (mirrors run_lvgl_screen's poll-side reset).
+        # Reset the shared HardwareButtons input timer so the next screen's inactivity/
+        # screensaver clock starts fresh.
         hw.update_last_input_time()
 
     reason = "complete" if complete else ("cancelled" if cancelled else "invalid")
