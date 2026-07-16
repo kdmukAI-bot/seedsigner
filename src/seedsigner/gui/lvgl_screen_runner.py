@@ -853,9 +853,9 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
         # TRANSLATOR_NOTE: title above the animated-QR density slider
         cfg["density_text"] = _("Density")
         # TRANSLATOR_NOTE: label at the low-density end of the QR density slider (bigger modules, easier to scan)
-        cfg["density_min_text"] = _("Easier")
+        cfg["density_min_text"] = _("Min")
         # TRANSLATOR_NOTE: label at the high-density end of the QR density slider (more data per frame, smaller modules)
-        cfg["density_max_text"] = _("Denser")
+        cfg["density_max_text"] = _("Max")
 
     # A QR being read is not LVGL "input activity", so the idle screensaver would otherwise
     # bounce over it. Suspend it for the screen's duration (0 disables; runtime-updatable —
