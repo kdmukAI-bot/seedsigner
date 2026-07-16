@@ -210,14 +210,29 @@ class SeedMnemonicEntryView(View):
 
 
     def run(self):
+        from seedsigner.compat import IS_MICROPYTHON
+
         # Native BIP39-word entry (live prefix match panel) on both platforms. The View
         # hands over the same flat attrs the native seed_mnemonic_entry_screen reads:
         # title -> top_nav.title, plus initial_letters + wordlist.
+        #
+        # Fresh-word seed: the joystick (hardware) build seeds the letter picker at "a" as
+        # its starting slot, but the touch build has no picker to position — seeding "a"
+        # there would wrongly pre-enter the letter, so it starts empty. MicroPython is the
+        # de-facto touch build for now; TODO: swap this for a real input-mode signal once
+        # touch-vs-joystick is separated cleanly from the platform.
+        if self.cur_word:
+            initial_letters = list(self.cur_word)   # editing: prefill the existing word
+        elif IS_MICROPYTHON:
+            initial_letters = []                     # touch: empty entry
+        else:
+            initial_letters = ["a"]                  # joystick: picker starts at "a"
+
         ret = self.run_screen(
             "seed_mnemonic_entry_screen",
             # TRANSLATOR_NOTE: Inserts the word number (e.g. "Seed Word #6")
             title=_("Seed Word #{}").format(self.cur_word_index + 1),  # Human-readable 1-indexing!
-            initial_letters=list(self.cur_word) if self.cur_word else ["a"],
+            initial_letters=initial_letters,
             wordlist=Seed.get_wordlist(wordlist_language_code=self.settings.get_value(SettingsConstants.SETTING__WORDLIST_LANGUAGE)),
         )
 
