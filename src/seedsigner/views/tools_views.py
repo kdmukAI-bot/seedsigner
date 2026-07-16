@@ -8,7 +8,7 @@ from seedsigner.compat.l10n import gettext as _
 from seedsigner.gui.constants import FontAwesomeIconConstants, GUIConstants, SeedSignerIconConstants
 from seedsigner.helpers import mnemonic_generation
 from seedsigner.models.seed import Seed
-from seedsigner.models.settings_definition import SettingsConstants
+from seedsigner.models.settings_definition import SettingsConstants, SettingsDefinition
 
 from .view import BackStackView, ButtonOption, Destination, RET_CODE__BACK_BUTTON, View
 
@@ -672,7 +672,6 @@ class ToolsAddressExplorerAddressTypeView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens.tools_screens import ToolsAddressExplorerAddressTypeScreen
         from seedsigner.views.seed_views import SeedOptionsView
         data = self.controller.address_explorer_data
 
@@ -689,13 +688,39 @@ class ToolsAddressExplorerAddressTypeView(View):
 
         button_data = [self.RECEIVE, self.CHANGE]
 
-        selected_menu_num = self.run_screen(
-            ToolsAddressExplorerAddressTypeScreen,
+        # The native screen only lays out already-localized strings, so the View resolves
+        # the two mutually-exclusive header shapes the PIL screen used to compose
+        # internally: a fingerprint + derivation read-out for a seed source, or the
+        # descriptor's policy name for a loaded wallet descriptor.
+        screen_kwargs = dict(
+            title=_("Address Explorer"),
             button_data=button_data,
-            fingerprint=self.seed.get_fingerprint() if self.seed_num is not None else None,
-            wallet_descriptor_display_name=wallet_descriptor_display_name,
-            script_type=script_type,
-            custom_derivation_path=self.custom_derivation,
+        )
+        if self.seed_num is not None:
+            if script_type == SettingsConstants.CUSTOM_DERIVATION:
+                derivation_text = self.custom_derivation
+            else:
+                derivation_text = SettingsDefinition.get_settings_entry(
+                    attr_name=SettingsConstants.SETTING__SCRIPT_TYPES
+                ).get_selection_option_display_name_by_value(value=script_type)
+            screen_kwargs.update(
+                fingerprint=self.seed.get_fingerprint(),
+                # TRANSLATOR_NOTE: a label for the shortened Key-id of a BIP-32 master HD wallet
+                fingerprint_label=_("Fingerprint"),
+                derivation_text=derivation_text,
+                # TRANSLATOR_NOTE: a label for the derivation-path into a BIP-32 HD wallet
+                derivation_label=_("Derivation"),
+            )
+        elif wallet_descriptor_display_name is not None:
+            screen_kwargs.update(
+                wallet_descriptor_text=wallet_descriptor_display_name,
+                # TRANSLATOR_NOTE: a label for a BIP-380-ish Output Descriptor
+                wallet_descriptor_label=_("Wallet descriptor"),
+            )
+
+        selected_menu_num = self.run_screen(
+            "tools_address_explorer_address_type_screen",
+            **screen_kwargs,
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:

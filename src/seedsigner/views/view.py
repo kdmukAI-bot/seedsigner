@@ -500,11 +500,9 @@ class PowerOptionsView(View):
     POWER_OFF = ButtonOption("Power off", SeedSignerIconConstants.POWER)
 
     def run(self):
-        from seedsigner.gui.screens.screen import LargeButtonScreen
-
         button_data = [self.RESET, self.POWER_OFF]
         selected_menu_num = self.run_screen(
-            LargeButtonScreen,
+            "power_options_screen",
             title=_("Reset / Power"),
             show_back_button=True,
             button_data=button_data

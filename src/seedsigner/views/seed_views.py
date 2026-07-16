@@ -1460,8 +1460,6 @@ class SeedTranscribeSeedQRFormatView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens import seed_screens
-
         seed = self.controller.get_seed(self.seed_num)
 
         if self.settings.get_value(SettingsConstants.SETTING__COMPACT_SEEDQR) != SettingsConstants.OPTION__ENABLED:
@@ -1482,9 +1480,17 @@ class SeedTranscribeSeedQRFormatView(View):
             button_data = [self.STANDARD_24, self.COMPACT_24]
 
         selected_menu_num = self.run_screen(
-            seed_screens.SeedTranscribeSeedQRFormatScreen,
+            "seed_transcribe_seedqr_format_screen",
             title=_("SeedQR Format"),
             button_data=button_data,
+            # TRANSLATOR_NOTE: Refers to the SeedQR type: Standard or Compact
+            standard_label=_("Standard"),
+            # TRANSLATOR_NOTE: Briefly explains the Standard SeedQR data format
+            standard_text=_("BIP-39 wordlist indices"),
+            # TRANSLATOR_NOTE: Refers to the SeedQR type: Standard or Compact
+            compact_label=_("Compact"),
+            # TRANSLATOR_NOTE: Briefly explains the Compact SeedQR data format
+            compact_text=_("Raw entropy bits"),
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
@@ -1576,6 +1582,7 @@ class SeedTranscribeSeedQRWholeQRView(View):
         # "Begin NxN" button from its own num_modules.
         ret = self.run_screen(
             "seed_transcribe_whole_qr_screen",
+            title=_("Transcribe SeedQR"),
             qr_data=qr_data,
             qr_mode=qr_mode,
             data_encoding=data_encoding,
@@ -1637,6 +1644,8 @@ class SeedTranscribeSeedQRZoomedInView(View):
             qr_data=qr_data,
             qr_mode=qr_mode,
             data_encoding=data_encoding,
+            # TRANSLATOR_NOTE: hint shown in the zoomed SeedQR transcription view (hardware-key builds)
+            exit_text=_("click to exit"),
             initial_zone_x=self.initial_zone_x,
             initial_zone_y=self.initial_zone_y,
             allow_screensaver=False,
@@ -2104,13 +2113,24 @@ class SeedAddressVerificationSuccessView(View):
     
 
     def run(self):
-        from seedsigner.gui.screens import seed_screens
+        unverified_address = self.controller.unverified_address
+
+        if unverified_address["verified_index_is_change"]:
+            # TRANSLATOR_NOTE: Describes the address type (change or receive)
+            address_type = _("change address")
+        else:
+            # TRANSLATOR_NOTE: Describes the address type (change or receive)
+            address_type = _("receive address")
 
         self.run_screen(
-            seed_screens.SeedAddressVerificationSuccessScreen,
-            address = self.controller.unverified_address["address"],
-            verified_index = self.controller.unverified_address["verified_index"],
-            verified_index_is_change = self.controller.unverified_address["verified_index_is_change"],
+            "seed_address_verification_success_screen",
+            title=_("Success!"),
+            status_headline=_("Address Verified"),
+            address=unverified_address["address"],
+            address_type_text=address_type,
+            # TRANSLATOR_NOTE: Describes the address index (e.g. "index 7")
+            index_text=_("index {}").format(unverified_address["verified_index"]),
+            button_data=[ButtonOption("OK")],
         )
 
         return Destination(MainMenuView)
