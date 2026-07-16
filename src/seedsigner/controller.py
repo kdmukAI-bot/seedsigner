@@ -336,9 +336,10 @@ class Controller(Singleton):
             else:
                 next_destination = Destination(MainMenuView)
             
-            # Set up our one-time toast notification tip to remove the SD card.
-            # The toast overlay is a PIL component (and @dataclass) pending LVGL
-            # migration; skip its import + activation on MicroPython.
+            # Set up our one-time toast notification tip to remove the SD card. The toast
+            # now renders via the native LVGL overlay, but this particular tip is specific
+            # to the seedsigner-os / Pi boot model (the device boots off the SD card, then
+            # the user may pull it), so it stays gated to CPython.
             if not IS_MICROPYTHON:
                 if self.settings.get_value(SettingsConstants.SETTING__MICROSD_TOAST_TIMER) == SettingsConstants.MICROSD_TOAST_TIMER_FIVE_SECONDS:
                     self.activate_toast(RemoveSDCardToastManagerThread())
@@ -450,13 +451,10 @@ class Controller(Singleton):
 
 
     def start_screensaver(self):
-        # If a toast is running, tell it to give up the Renderer.lock; it will then
-        # block until the screensaver is done, at which point the toast can re-acquire
-        # the Renderer.lock and resume where it left off.
-        if self.toast_notification_thread and self.toast_notification_thread.is_alive():
-            logger.info(f"Controller: settings toggle_render_lock for {self.toast_notification_thread.__class__.__name__}")
-            self.toast_notification_thread.toggle_renderer_lock()
-
+        # Toast/screensaver coexistence is now owned by the native LVGL overlay_manager (a
+        # toast suppresses screensaver activation while it shows, and a new toast breaks a
+        # running screensaver), so the Controller no longer hands the Renderer.lock back
+        # and forth between them.
         logger.info("Controller: Starting screensaver")
         if not self.screensaver:
             self.screensaver = Screensaver()

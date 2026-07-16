@@ -660,9 +660,6 @@ class QRDisplayScreen(BaseScreen):
 
 
         def render_brightness_tip(self, image: Image.Image) -> None:
-            # TODO: Refactor ToastOverlay to support two lines of icon + text and use
-            # that instead of this more manual approach.
-
             # Instantiate a temp Image and ImageDraw object to draw on
             rectangle_width = image.width
             rectangle_height = GUIConstants.COMPONENT_PADDING * 2 + GUIConstants.get_body_font_size() * 2 + GUIConstants.BODY_LINE_SPACING
