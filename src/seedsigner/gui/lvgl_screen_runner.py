@@ -456,6 +456,75 @@ def _load_active_locale_fonts(lv):
         pass
 
 
+# --- Toast overlay ------------------------------------------------------------
+# A toast is NOT a screen: it's a transient banner the native overlay_manager composites
+# on the display's top layer, over whatever screen is live. So it has no run_screen/cfg/
+# return path — it's a fire-and-forget push (safe to call from a producer thread, e.g. the
+# Pi's SD-card detector). Both functions degrade to a no-op when the native runtime is
+# absent (dev/CI/host tests) so a notification never crashes or blocks its caller.
+
+def show_toast(label_text, icon_name=None, outline_color=None, font_color=None, duration_ms=3000):
+    """Show a native LVGL toast overlay, REPLACING any currently-showing toast.
+
+    Fire-and-forget: the native overlay_manager owns everything after this call —
+    auto-dismiss after ``duration_ms`` (0 = stay until dismissed/replaced), dismissal on
+    any input, one-at-a-time replacement, AND screensaver coexistence (a new toast breaks
+    the screensaver; screensaver activation is suppressed while the toast shows). The
+    library is policy-free; the host supplies the resolved policy: ``icon_name`` is a
+    ``SeedSignerIconConstants`` glyph (its values ARE the icon-font PUA glyphs, like button
+    icons; None = text-only), and ``outline_color``/``font_color`` are PIL color strings.
+
+    Assembles the flat args into the native cfg dict and hands it over — the SAME
+    dict-cfg shape the screen builders use, so the binding parses it uniformly. Colors
+    cross the boundary as ``0xRRGGBB`` ints (a direct ``uint32_t`` for the native
+    ``toast_overlay_spec_t``); ``None`` fields are omitted so the native default applies.
+    No-op when the native runtime is absent (dev/CI/host tests); a notification must never
+    crash or block its caller. The binding is platform-symmetric — see the toast binding
+    contract (``docs/toast-binding-contract.md`` in both seedsigner-raspi-lvgl and
+    seedsigner-micropython-builder).
+    """
+    try:
+        ensure_lvgl_runtime()
+    except ImportError:
+        return
+    try:
+        cfg = {"label_text": label_text or "", "duration_ms": int(duration_ms)}
+        if icon_name:
+            cfg["icon"] = icon_name
+        outline = _lvgl_color(outline_color)
+        if outline:
+            cfg["outline_color"] = int(outline.lstrip("#"), 16)
+        font = _lvgl_color(font_color)
+        if font:
+            cfg["font_color"] = int(font.lstrip("#"), 16)
+        _lv.show_toast(cfg)
+    except Exception:
+        # A notification toast must never take down the caller.
+        logger.exception("show_toast failed")
+
+
+def dismiss_toast():
+    """Dismiss the currently-showing native toast, if any (no-op when none is showing or
+    the native runtime is absent).
+
+    **LVGL-thread only** — it wraps the native ``toast_overlay_dismiss()``, which mutates
+    the widget tree directly (no producer-thread marshalling; there is no thread-safe
+    ``overlay_manager_dismiss_toast()``). Routine toasts self-dismiss on their
+    ``duration_ms`` timer, so the app does NOT reach for this from its producer threads;
+    it is the documented entry point for a future LVGL-thread caller (e.g. a screen that
+    clears its own toast). See the toast binding contract (``docs/toast-binding-contract.md``
+    in seedsigner-raspi-lvgl / -micropython-builder).
+    """
+    try:
+        ensure_lvgl_runtime()
+    except ImportError:
+        return
+    try:
+        _lv.dismiss_toast()
+    except Exception:
+        logger.exception("dismiss_toast failed")
+
+
 def run_lvgl_screen(renderer, screen, *, attrs=None):
     """Run an LVGL screen while holding the renderer lock; return its result.
 
