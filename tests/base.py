@@ -190,7 +190,8 @@ class FlowTest(BaseTest):
         the Controller's flow control logic and the routing from View to View.
         """
         with patch("seedsigner.views.view.Destination._run_view", autospec=True) as mock_run_view:
-            with patch("seedsigner.views.view.View.run_screen", autospec=True) as mock_run_screen:
+            with patch("seedsigner.views.view.View.run_screen", autospec=True) as mock_run_screen, \
+                 patch("seedsigner.views.view.View.run_qr_display_screen", autospec=True) as mock_run_qr_display_screen:
                 def run_view(destination: Destination, *args, **kwargs):
                     """ Replaces Destination._run_view() """
                     if len(sequence) == 0:
@@ -298,6 +299,14 @@ class FlowTest(BaseTest):
                 # Mock out the View.run_screen() method so we can provide the
                 # return value that is specified in the test sequence.
                 mock_run_screen.side_effect = run_screen
+
+                # View.run_qr_display_screen() routes straight to the native LVGL runner
+                # (no View.run_screen hop), so intercept it too. Delegating to the
+                # run_screen *mock* (not the bare replacement fn) keeps the FlowStep
+                # screen_return_value contract AND the call-count-based redirect
+                # detection working for QR display Views.
+                mock_run_qr_display_screen.side_effect = (
+                    lambda view, *, qr_encoder: mock_run_screen(view, "qr_display_screen", qr_encoder=qr_encoder))
 
                 # Start the Controller with the first View_cls specified in the test sequence
                 if sequence[0].expected_view != MainMenuView:

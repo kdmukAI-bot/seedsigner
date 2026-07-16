@@ -806,7 +806,7 @@ def _encoder_to_qr_cfg(encoder):
 
 
 def run_qr_display_screen(encoder, *, allow_screensaver=False):
-    """Drive the native animated QR-display pipeline for a QRDisplayScreen (MicroPython / ESP32).
+    """Drive the native animated QR-display pipeline for a QRDisplayScreen (both platforms).
 
     The native ``qr_display_screen`` owns rendering + the brightness UI (hardware hints / touch
     slider) + the brightness tip. Python builds the initial cfg, then — for an animated
@@ -816,8 +816,13 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
     the user exits (``qr_display_done``); the caller routes on its own fixed Destination and
     ignores the value (parity with the PIL QRDisplayScreen, which also returns nothing useful).
 
-    Mirrors ``run_scan_screen``: a dedicated MicroPython-only frame driver (the View gates it by
-    ``IS_MICROPYTHON``, keeping the PIL QRDisplayScreen on CPython/Pi until the cutover)."""
+    One frame loop, two pump mechanics — ``run_lvgl_screen``'s split: MicroPython's native task
+    pumps LVGL and owns the display, so this loop only polls; CPython / Pi Zero (blended display)
+    pumps LVGL itself under ``renderer.lock`` and routes pixels through the PIL driver's flush
+    callback. The Pi routes here rather than to the PIL ``QRDisplayScreen`` because the PIL
+    screen reads GPIO through ``HardwareButtons`` — a second reader, independent of the native
+    input gate, that treats a still-held key as *new* input, so a click held slightly too long
+    skipped or instantly dismissed the QR (see docs/_integration/pi-pil-input-cutover-todo.md)."""
     ensure_lvgl_runtime()
     import time
     from seedsigner.compat.l10n import gettext as _
@@ -863,12 +868,37 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
     # after a display longer than the timeout the next screen may screensave immediately.
     if not allow_screensaver:
         _lv.set_screensaver_timeout(0)
+    renderer = None
     try:
-        _lv.clear_result_queue()
-        _lv.qr_display_screen(cfg)
+        if IS_MICROPYTHON:
+            _lv.clear_result_queue()
+            _lv.qr_display_screen(cfg)
+        else:
+            # CPython / Pi Zero blended display: LVGL only advances on a host pump, so the
+            # frame loop below pumps under renderer.lock (PIL and LVGL never write the panel
+            # concurrently) with pixels routed through the PIL driver's flush callback —
+            # run_lvgl_screen's mechanics. A caller may hand over with a loading spinner
+            # still animating on its background pump (e.g. "Signing..." ->
+            # PSBTSignedQRDisplayView); this entry point bypasses the View.run_screen seam,
+            # so stop it here. TRANSITIONAL: this branch collapses into the MicroPython one
+            # at the Pi native display-pump cutover.
+            stop_loading_pump()
+            from seedsigner.gui.renderer import Renderer
+            renderer = Renderer.get_instance()
+            with renderer.lock:
+                _lv.set_flush_mode("python")
+                _lv.set_flush_callback(_make_flush_callback(renderer.disp))
+                _lv.clear_result_queue()
+                _lv.qr_display_screen(cfg)
+
         was_tip_active = False
         while True:
-            event = _lv.poll_for_result()
+            if IS_MICROPYTHON:
+                event = _lv.poll_for_result()
+            else:
+                with renderer.lock:
+                    _lv.lvgl_pump(5, 1)
+                    event = _lv.poll_for_result()
             if event is not None:
                 result = _translate_event(event)
                 if isinstance(result, QRBrightnessEvent):
@@ -885,6 +915,12 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
                     settings.set_value(SettingsConstants.SETTING__QR_DENSITY, result.value)
                     continue
                 # Any other event is the user exiting the screen.
+                if not IS_MICROPYTHON:
+                    # Reset the PIL-side input timer so returning to a PIL screen doesn't
+                    # immediately re-trigger the PIL screensaver (dies with HardwareButtons
+                    # at its retirement).
+                    from seedsigner.hardware.buttons import HardwareButtons
+                    HardwareButtons.get_instance().update_last_input_time()
                 return result
 
             if is_animated:
@@ -896,8 +932,14 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
                     _lv.qr_display_set_frame(_qr_frame_bytes(encoder.next_part()))
                 was_tip_active = tip_active
 
-            time.sleep_ms(166)  # ~6 fps, matching the PIL QRDisplayThread cadence
+            # ~6 fps, matching the PIL QRDisplayThread cadence (sleep_ms is MicroPython-only).
+            if IS_MICROPYTHON:
+                time.sleep_ms(166)
+            else:
+                time.sleep(0.166)
     finally:
+        if not IS_MICROPYTHON:
+            _lv.set_flush_callback(None)
         if not allow_screensaver:
             _lv.set_screensaver_timeout(_screensaver_timeout_ms)
 
