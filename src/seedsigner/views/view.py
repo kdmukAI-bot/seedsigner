@@ -371,18 +371,16 @@ class View:
 
 
     def run_qr_display_screen(self, *, qr_encoder):
-        """Display a static or animated QR.
-
-        Native ``qr_display_screen`` frame driver on MicroPython (the animated UR-fountain case
-        pushes frames + honors the brightness tip); the PIL ``QRDisplayScreen`` on CPython / Pi
-        Zero (blended display), kept until the Pi camera/QR path moves to native at the PIL
-        cutover — mirroring ScanView's ``IS_MICROPYTHON`` split for camera/dynamic screens.
-        Callers ignore the return value and route on their own fixed Destination."""
-        if IS_MICROPYTHON:
-            from seedsigner.gui.lvgl_screen_runner import run_qr_display_screen as _run_qr_display_screen
-            return _run_qr_display_screen(qr_encoder)
-        from seedsigner.gui.screens.screen import QRDisplayScreen
-        return self.run_screen(QRDisplayScreen, qr_encoder=qr_encoder)
+        """Display a static or animated QR via the native ``qr_display_screen`` frame driver
+        (the animated UR-fountain case pushes frames + honors the brightness tip) on BOTH
+        platforms — the runner owns the per-platform pump mechanics. The PIL
+        ``QRDisplayScreen`` stays in-tree (upstream parity) but is unreachable on-device;
+        keeping the Pi native here keeps GPIO input on the native held-key gate instead of
+        the PIL screen's independent ``HardwareButtons`` reader (see
+        docs/_integration/pi-pil-input-cutover-todo.md). Callers ignore the return value and
+        route on their own fixed Destination."""
+        from seedsigner.gui.lvgl_screen_runner import run_qr_display_screen as _run_qr_display_screen
+        return _run_qr_display_screen(qr_encoder)
 
 
     def run(self, **kwargs) -> 'Destination':
