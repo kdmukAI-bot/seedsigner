@@ -78,9 +78,19 @@ class BackgroundImportThread(BaseThread):
         Controller.get_instance()._storage = SeedStorage()
 
         if not IS_MICROPYTHON:
-            # CPython-only warm-ups for the camera stream.
-            time_import('numpy')  # used by PiVideoStream; by far the slowest import (2.29s)
-            time_import('seedsigner.hardware.pivideostream')
+            # CPython-only warm-ups for the picamera capture stack (numpy is
+            # PiVideoStream's dep, and by far the slowest import at ~2.29s). Guard each
+            # one: the libcamera-based Pi image (SeedSigner OS #114) drops numpy +
+            # picamera, so a missing camera dep must degrade only its own warm-up, never
+            # truncate the rest of this thread (the views, embit, the LVGL runtime below).
+            # TODO: once the Pi capture path moves off picamera, gate this block on a
+            # native-camera-capability probe instead of warming it at all — see
+            # docs/_integration/pi-startup-camera-warmup-regate-todo.md.
+            for _camera_warmup in ('numpy', 'seedsigner.hardware.pivideostream'):
+                try:
+                    time_import(_camera_warmup)
+                except ImportError:
+                    pass
 
         # Get MainMenuView's four destinations ready to respond quickly. On
         # MicroPython this deep import chain needs the enlarged secondary-thread
