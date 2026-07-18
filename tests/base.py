@@ -17,6 +17,7 @@ sys.modules['seedsigner.hardware.ili9341'] = MagicMock()
 from seedsigner.controller import Controller, FlowBasedTestException, StopFlowBasedTest
 from seedsigner.gui.screens.screen import RET_CODE__BACK_BUTTON, RET_CODE__POWER_BUTTON, ButtonOption
 from seedsigner.hardware.microsd import MicroSD
+from seedsigner.hardware.scan_consumer import ScanResult
 from seedsigner.models.settings import Settings
 from seedsigner.views.view import Destination, MainMenuView, View
 
@@ -191,7 +192,9 @@ class FlowTest(BaseTest):
         """
         with patch("seedsigner.views.view.Destination._run_view", autospec=True) as mock_run_view:
             with patch("seedsigner.views.view.View.run_screen", autospec=True) as mock_run_screen, \
-                 patch("seedsigner.views.view.View.run_qr_display_screen", autospec=True) as mock_run_qr_display_screen:
+                 patch("seedsigner.views.view.View.run_qr_display_screen", autospec=True) as mock_run_qr_display_screen, \
+                 patch("seedsigner.gui.lvgl_screen_runner.run_scan_screen") as mock_run_scan_screen, \
+                 patch("seedsigner.gui.lvgl_screen_runner.run_camera_preview_scan") as mock_run_camera_preview_scan:
                 def run_view(destination: Destination, *args, **kwargs):
                     """ Replaces Destination._run_view() """
                     if len(sequence) == 0:
@@ -307,6 +310,25 @@ class FlowTest(BaseTest):
                 # detection working for QR display Views.
                 mock_run_qr_display_screen.side_effect = (
                     lambda view, *, qr_encoder: mock_run_screen(view, "qr_display_screen", qr_encoder=qr_encoder))
+
+                # Scan Views are native-only (no PIL ScanScreen fallback), so patch the
+                # native camera out here: both scan runners route through the same
+                # delegation as above, then adapt into the runner's ScanResult contract.
+                # FlowStep semantics for scan steps: `before_run` injects QR payloads
+                # into view.decoder; screen_return_value False mimics a user cancel
+                # (the old ScanScreen back-out convention), anything else proceeds.
+                def native_scan_runner(decoder, **kwargs):
+                    ret = mock_run_screen(None, "native_scan_runner", decoder=decoder)
+                    return ScanResult(
+                        decoder=decoder,
+                        complete=decoder.is_complete,
+                        cancelled=(ret is False),
+                        reason="flow-test",
+                        polls=0,
+                        dropped_new=0,
+                    )
+                mock_run_scan_screen.side_effect = native_scan_runner
+                mock_run_camera_preview_scan.side_effect = native_scan_runner
 
                 # Start the Controller with the first View_cls specified in the test sequence
                 if sequence[0].expected_view != MainMenuView:
