@@ -776,25 +776,6 @@ def run_scan_screen(decoder, *, allow_screensaver=False):
             _lv.set_screensaver_timeout(_screensaver_timeout_ms)
 
 
-def camera_preview_lvgl_available():
-    """True if the native runtime exposes the Pi camera-preview scan surface.
-
-    A lightweight, side-effect-free capability probe (imports the module but does NOT
-    initialize the runtime): the ScanView gate calls it to pick the LVGL live-preview
-    scan over the legacy PIL ScanScreen. False on dev/CI (no native module) and against
-    an older ``.so`` that predates the ``camera_preview_screen`` binding, so both keep
-    the PIL fallback. The dual name mirrors ``ensure_lvgl_runtime`` (the ESP32 firmware
-    still registers the pre-rename module)."""
-    try:
-        import seedsigner_lvgl_screens as lv
-    except ImportError:
-        try:
-            import seedsigner_lvgl as lv
-        except ImportError:
-            return False
-    return hasattr(lv, "camera_preview_screen")
-
-
 def _numpy_rgb_to_rgb565(frame, rotation):
     """Convert one picamera numpy frame to a 240x240 LVGL-native RGB565 byte string.
 

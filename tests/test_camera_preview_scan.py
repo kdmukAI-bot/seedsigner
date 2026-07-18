@@ -71,13 +71,6 @@ def test_numpy_rgb_to_rgb565_rotation_180():
     assert px[239, 239] == 0xF800   # red rotated to BR
 
 
-# --- capability gate ----------------------------------------------------------
-
-def test_camera_preview_lvgl_available_false_without_native_module():
-    """No native module on dev/CI -> gate is False so ScanView keeps the PIL fallback."""
-    assert runner.camera_preview_lvgl_available() is False
-
-
 # --- _CameraScanDecodeThread (driven synchronously for determinism) -----------
 
 def _decoder(statuses, percents):
