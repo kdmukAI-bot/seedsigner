@@ -699,6 +699,46 @@ def stop_loading_pump():
         _lv.set_flush_callback(None)
 
 
+def clear_screen():
+    """Blank the display to black — the app's parting frame on exit.
+
+    Loads an all-black LVGL screen and pumps it to the panel via the native clear_screen
+    binding (raspi py_clear_screen -> lvgl_clear_to_black). A no-op when the native runtime
+    is absent (dev/CI, ImportError) or the deployed .so/firmware predates the clear_screen
+    binding, so it is safe against whatever binary is on-device.
+
+      * CPython/Pi Zero (blended display): the native pump only reaches the ST7789 through
+        the PIL driver's flush callback, so install it under renderer.lock the same way
+        run_lvgl_screen does; clear_screen pumps the black frame out before returning, then
+        drop the callback. TRANSITIONAL — collapses to a bare _lv.clear_screen() at the Pi
+        native display-pump cutover.
+      * MicroPython/ESP32: the native display task owns the panel, so a direct call is all
+        that's needed. The ESP32 firmware does not bind clear_screen yet, so the hasattr
+        guard keeps this a no-op there for now (matching the prior no-blank-on-exit behavior).
+    """
+    # A parting loading spinner would otherwise keep its pump thread flushing over our
+    # black frame; stop it first (idempotent, no-op when idle) so the panel is ours.
+    stop_loading_pump()
+    try:
+        ensure_lvgl_runtime()
+    except ImportError:
+        return  # native module absent (dev/CI)
+    if not hasattr(_lv, "clear_screen"):
+        return  # deployed .so/firmware predates the binding
+    if IS_MICROPYTHON:
+        _lv.clear_screen()
+        return
+
+    # CPython blended display: route the native black frame through the PIL driver.
+    from seedsigner.gui.renderer import Renderer
+    renderer = Renderer.get_instance()
+    with renderer.lock:
+        _lv.set_flush_mode("python")
+        _lv.set_flush_callback(_make_flush_callback(renderer.disp))
+        _lv.clear_screen()  # loads black + pumps it out to the panel
+        _lv.set_flush_callback(None)
+
+
 def _make_scan_should_continue():
     """Build the ``should_continue`` callable that ends a scan on user cancel.
 
