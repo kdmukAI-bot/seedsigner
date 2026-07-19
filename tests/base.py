@@ -193,7 +193,7 @@ class FlowTest(BaseTest):
         with patch("seedsigner.views.view.Destination._run_view", autospec=True) as mock_run_view:
             with patch("seedsigner.views.view.View.run_screen", autospec=True) as mock_run_screen, \
                  patch("seedsigner.views.view.View.run_qr_display_screen", autospec=True) as mock_run_qr_display_screen, \
-                 patch("seedsigner.gui.lvgl_screen_runner.run_scan_screen") as mock_run_scan_screen, \
+                 patch("seedsigner.gui.lvgl_screen_runner.run_camera_scan") as mock_run_camera_scan, \
                  patch("seedsigner.gui.lvgl_screen_runner.run_camera_preview_scan") as mock_run_camera_preview_scan:
                 def run_view(destination: Destination, *args, **kwargs):
                     """ Replaces Destination._run_view() """
@@ -327,7 +327,7 @@ class FlowTest(BaseTest):
                         polls=0,
                         dropped_new=0,
                     )
-                mock_run_scan_screen.side_effect = native_scan_runner
+                mock_run_camera_scan.side_effect = native_scan_runner
                 mock_run_camera_preview_scan.side_effect = native_scan_runner
 
                 # Start the Controller with the first View_cls specified in the test sequence

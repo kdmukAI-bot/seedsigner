@@ -1,7 +1,6 @@
 import logging
 import re
 
-from seedsigner.compat import IS_MICROPYTHON
 from seedsigner.compat.l10n import gettext as _
 from seedsigner.gui.constants import StatusType
 from seedsigner.helpers.l10n import mark_for_translation as _mft
@@ -41,43 +40,14 @@ class ScanView(View):
 
 
     def run(self):
-        # Scanning is native-only on both platforms — there is deliberately NO PIL
-        # ScanScreen fallback (dev/CI patch the native runners out; see tests/base.py).
-        if IS_MICROPYTHON:
-            # Native camera scan (ESP32): the native camera_scanner module owns the
-            # live preview + overlay; run_scan_screen drives DecodeQR and returns a
-            # ScanResult. A user cancel (the overlay's touch back button) pops back
-            # one screen, mirroring the Pi Zero "press LEFT to cancel" behavior.
-            from seedsigner.gui.lvgl_screen_runner import run_scan_screen
+        from seedsigner.gui.lvgl_screen_runner import run_camera_scan
 
-            result = run_scan_screen(self.decoder)
-            if result is None:
-                # Native camera bring-up failed; recover to a notice + the menu
-                # rather than crashing.
-                return Destination(ScanCameraErrorView)
-            if result.cancelled:
-                return Destination(BackStackView)
-        else:
-            # CPython / Pi Zero: render the live preview + QR-scan overlay through
-            # LVGL (blended display) while picamera capture + DecodeQR decode stay
-            # in Python. Same shape as the MicroPython branch. A missing native
-            # runtime surfaces loudly at ensure_lvgl_runtime (never a PIL fallback).
-            from seedsigner.gui.lvgl_screen_runner import run_camera_preview_scan
-
-            # The overlay's hardware-mode bottom line ("< back  |  <instructions>"),
-            # already localized.
-            instructions = "< " + _("back") + "  |  " + _(self.instructions_text)
-            result = run_camera_preview_scan(self.decoder, instructions_text=instructions)
-            if result is None:
-                # Camera bring-up failed; recover to a notice + the menu, like the
-                # MicroPython path, rather than crashing.
-                return Destination(ScanCameraErrorView)
-            if result.cancelled:
-                return Destination(BackStackView)
-
-            # A long scan might have exceeded the screensaver timeout; ensure the
-            # screensaver doesn't immediately engage when we leave here.
-            self.controller.reset_screensaver_timeout()
+        result = run_camera_scan(self.decoder)
+        if result is None:
+            # Camera failed to start; recover to a notice + the menu rather than crashing.
+            return Destination(ScanCameraErrorView)
+        if result.cancelled:
+            return Destination(BackStackView)
 
         # Handle the results
         if self.decoder.is_complete:

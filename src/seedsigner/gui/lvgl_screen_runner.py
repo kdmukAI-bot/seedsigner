@@ -725,18 +725,35 @@ def _make_scan_should_continue():
     return should_continue
 
 
-def run_scan_screen(decoder, *, allow_screensaver=False):
-    """Drive the native camera-scan pipeline for a ScanView (MicroPython / ESP32).
+def run_camera_scan(decoder):
+    """Drive the camera-scan pipeline for a QR scan on either hardware target.
 
-    Unlike ``run_lvgl_screen`` — which builds a widget tree and polls for a button
-    result — the scan is a camera pipeline: the native ``camera_scanner`` module owns
-    the live preview + overlay, and Python polls decoded QR payloads into ``decoder``
-    via ``scan_consumer.run_scan``. User cancel (the overlay's touch back button, or a
-    hardware back/LEFT press) is surfaced through ``should_continue``.
+    ``camera_scanner`` is a platform-specific C module that both targets build to one
+    shared interface: a CPython extension on the Pi Zero (from seedsigner-raspi-lvgl)
+    and a MicroPython C module on the ESP32 (from seedsigner-micropython-builder).
+    Because the interface is identical, this single function drives the scan on both
+    platforms with no per-platform branch.
 
-    Returns the ScanResult; the caller (ScanView) reads ``decoder`` and
+    Unlike ``run_lvgl_screen`` — which builds a widget tree and polls for a single
+    button result — a scan is a continuous pipeline that loops until a QR decodes or
+    the user backs out. Each frame flows through:
+
+      1. Capture, preview, decode: ``camera_scanner`` grabs the next camera frame,
+         paints it as the live preview beneath the scan overlay's LVGL UI (status/
+         instructions text and a back button), and decodes any QR in C. Python is
+         then handed the decoded payload bytes, never the image.
+      2. Ingest: ``scan_consumer.run_scan`` drains the scanner's decoded-payload ring
+         and hands each payload to a Python ``DecodeQR``. Fountain-coded BC-UR is
+         reassembled natively by the cUR module (``uUR``) on both targets, so
+         Python receives one complete UR payload rather than the individual animated
+         parts; BBQR is the exception, its segments still arriving per-frame for
+         DecodeQR to reassemble in Python.
+      3. Cancel check: ``should_continue`` is polled each frame so a user cancel — the
+         overlay's back button or a hardware back/LEFT press — stops the loop promptly.
+
+    Returns the ScanResult; the caller reads ``decoder`` (the decoded payload) and
     ``result.cancelled`` to route. Returns ``None`` if the camera failed to start
-    (native bring-up error) so the caller can recover instead of crashing.
+    (C-module bring-up error) so the caller can recover instead of crashing.
     """
     ensure_lvgl_runtime()
     import camera_scanner
@@ -745,11 +762,18 @@ def run_scan_screen(decoder, *, allow_screensaver=False):
     # The camera preview isn't LVGL "input activity", so the native idle screensaver
     # would otherwise fire over it. Suspend it for the scan's duration by zeroing the
     # timeout, then restore (0 disables; runtime-updatable — the overlay-manager
-    # contract). NOTE: after a scan longer than the timeout the inactivity clock is
-    # already past it, so the screensaver may fire on the next screen until a native
-    # activity-reset binding lands — a small follow-up, not a blocker.
-    if not allow_screensaver:
-        _lv.set_screensaver_timeout(0)
+    # contract). A long scan leaves LVGL's inactivity clock stale (already past the
+    # timeout), but the native camera overlay resets it on teardown
+    # (reset_idle_clock_on_teardown), so the successor screen still gets a full
+    # screensaver window.
+    #
+    # TODO: this suppression should move into the native camera overlay screen, which
+    # should own "no screensaver while scanning" by carrying SS_OBJ_FLAG_NO_SCREENSAVER
+    # (the overlay-manager's per-screen opt-out, as an allow_screensaver=false screen
+    # does). lvgl-screens to-do: stamp that flag on the camera preview overlay (and the
+    # camera_entropy twin). Once the native screen owns it, drop this override and the
+    # outer try/finally that exists only to restore the timeout.
+    _lv.set_screensaver_timeout(0)
     try:
         try:
             camera_scanner.start()
@@ -772,8 +796,7 @@ def run_scan_screen(decoder, *, allow_screensaver=False):
         finally:
             camera_scanner.stop()
     finally:
-        if not allow_screensaver:
-            _lv.set_screensaver_timeout(_screensaver_timeout_ms)
+        _lv.set_screensaver_timeout(_screensaver_timeout_ms)
 
 
 def _numpy_rgb_to_rgb565(frame, rotation):
@@ -1092,7 +1115,7 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
 
     # A QR being read is not LVGL "input activity", so the idle screensaver would otherwise
     # bounce over it. Suspend it for the screen's duration (0 disables; runtime-updatable —
-    # the overlay-manager contract), then restore. Same known follow-up as run_scan_screen:
+    # the overlay-manager contract), then restore. Same known follow-up as run_camera_scan:
     # after a display longer than the timeout the next screen may screensave immediately.
     if not allow_screensaver:
         _lv.set_screensaver_timeout(0)
@@ -1175,7 +1198,7 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
 def run_image_entropy_screen(*, seed_hash=None, allow_screensaver=False):
     """Drive the native image-entropy capture pipeline (MicroPython / ESP32).
 
-    Mirrors ``run_scan_screen``: the native ``camera_entropy`` module owns the live preview +
+    Mirrors ``run_camera_scan``: the native ``camera_entropy`` module owns the live preview +
     overlay; Python drives the documented host loop (see modcamera_entropy.c):
 
         start(seed_hash) -> live preview (poll frames_chained for progress) -> capture() ->
@@ -1203,7 +1226,7 @@ def run_image_entropy_screen(*, seed_hash=None, allow_screensaver=False):
     from seedsigner.compat.l10n import gettext as _
 
     # The camera preview isn't LVGL "input activity", so suspend the idle screensaver for the
-    # capture's duration (0 disables; runtime-updatable), then restore — same as run_scan_screen.
+    # capture's duration (0 disables; runtime-updatable), then restore — same as run_camera_scan.
     if not allow_screensaver:
         _lv.set_screensaver_timeout(0)
     try:
@@ -1306,7 +1329,7 @@ def run_seed_address_verification_screen(*, address, type_network, network, titl
     }
 
     # A scan-in-progress is not LVGL "input activity", so suspend the idle screensaver for the
-    # screen's duration (mirrors run_qr_display_screen / run_scan_screen), then restore.
+    # screen's duration (mirrors run_qr_display_screen / run_camera_scan), then restore.
     if not allow_screensaver:
         _lv.set_screensaver_timeout(0)
     try:

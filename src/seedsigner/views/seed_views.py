@@ -1711,44 +1711,15 @@ class SeedTranscribeSeedQRConfirmScanView(View):
         self.decoder = DecodeQR(wordlist_language_code=wordlist_language_code)
 
     def run(self):
-        from seedsigner.compat import IS_MICROPYTHON
         from seedsigner.views.scan_views import ScanCameraErrorView
+        from seedsigner.gui.lvgl_screen_runner import run_camera_scan
 
-        # Scanning is native-only on both platforms — there is deliberately NO PIL
-        # ScanScreen fallback (dev/CI patch the native runners out; see tests/base.py).
-        if IS_MICROPYTHON:
-            # Native camera scan (ESP32): the native camera_scanner module owns the
-            # live preview + overlay; run_scan_screen drives DecodeQR and returns a
-            # ScanResult. A user cancel (the overlay's touch back button) pops back to
-            # the transcribe prompt, mirroring the Pi Zero "press LEFT to cancel".
-            from seedsigner.gui.lvgl_screen_runner import run_scan_screen
-
-            result = run_scan_screen(self.decoder)
-            if result is None:
-                # Native camera bring-up failed; recover to a notice + the menu
-                # rather than crashing.
-                return Destination(ScanCameraErrorView)
-            if result.cancelled:
-                return Destination(BackStackView)
-        else:
-            # CPython / Pi Zero: the native LVGL camera-preview scan (blended display);
-            # picamera capture + DecodeQR decode stay in Python. Same shape as ScanView.
-            from seedsigner.gui.lvgl_screen_runner import run_camera_preview_scan
-
-            # The overlay's hardware-mode bottom line ("< back  |  <instructions>"),
-            # already localized.
-            instructions = "< " + _("back") + "  |  " + _("Scan your SeedQR")
-            result = run_camera_preview_scan(self.decoder, instructions_text=instructions)
-            if result is None:
-                # Camera bring-up failed; recover to a notice + the menu rather
-                # than crashing.
-                return Destination(ScanCameraErrorView)
-            if result.cancelled:
-                return Destination(BackStackView)
-
-            # A long scan might have exceeded the screensaver timeout; ensure the
-            # screensaver doesn't immediately engage when we leave here.
-            self.controller.reset_screensaver_timeout()
+        result = run_camera_scan(self.decoder)
+        if result is None:
+            # Camera failed to start; recover to a notice + the menu rather than crashing.
+            return Destination(ScanCameraErrorView)
+        if result.cancelled:
+            return Destination(BackStackView)
 
         if self.decoder.is_complete:
             if self.decoder.is_seed:
