@@ -380,17 +380,7 @@ class Controller(Singleton):
                     # Display user-friendly error screen w/debugging info
                     from seedsigner.compat.traceback import print_exception
                     print_exception(e)
-                    if IS_MICROPYTHON:
-                        # handle_exception routes to the PIL UnhandledExceptionView
-                        # (ErrorScreen), which can't render on MicroPython — so the
-                        # recovery itself would crash and kill the session. During
-                        # LVGL bring-up the dominant cause is a not-yet-migrated
-                        # screen failing at its lazy PIL import; show the recoverable
-                        # LVGL notice and return home so the session survives.
-                        from seedsigner.views.view import NotYetImplementedView
-                        next_destination = Destination(NotYetImplementedView, clear_history=True)
-                    else:
-                        next_destination = self.handle_exception(e)
+                    next_destination = self.handle_exception(e)
 
                 if not next_destination:
                     # Should only happen during dev when you hit an unimplemented option
