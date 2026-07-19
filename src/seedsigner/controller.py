@@ -423,11 +423,8 @@ class Controller(Singleton):
 
             # Clear the screen when exiting
             logger.info("Clearing screen, exiting")
-            if not IS_MICROPYTHON:
-                # display_blank_screen lives on the PIL Renderer; on MicroPython the
-                # native LVGL module owns the panel (LvglRenderer holds no canvas).
-                from seedsigner.gui.renderer import Renderer
-                Renderer.get_instance().display_blank_screen()
+            from seedsigner.gui.lvgl_screen_runner import clear_screen
+            clear_screen()
 
 
     @property
