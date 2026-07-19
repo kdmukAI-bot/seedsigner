@@ -45,7 +45,7 @@ class ButtonOption:
 
     def __eq__(self, other):
         # Formerly a @dataclass; stock MicroPython has no `dataclasses` module. The
-        # synthesized value-equality is load-bearing: the flow-test harness locates a
+        # synthesized value-equality is essential: the flow-test harness locates a
         # selection via `button_data.index(ButtonOption(...))`, comparing distinct
         # instances field-by-field. Defining __eq__ (and leaving __hash__ unset, which
         # makes instances unhashable) reproduces exactly what @dataclass gave us. The
@@ -655,20 +655,6 @@ class UnhandledExceptionView(View):
     def __init__(self, error: list[str]):
         self.error = error
         self.__post_init__()
-
-    def __post_init__(self):
-        from seedsigner.hardware.camera import CameraConnectionError
-        super().__post_init__()
-
-        # Camera errors bubble up to here. Reroute to their custom error View.
-        if self.error[0] == CameraConnectionError.__name__:
-            self.set_redirect(
-                Destination(
-                    CameraConnectionErrorView,
-                    skip_current_view=True,
-                )
-            )
-
 
     def run(self):
         # The exception class + message are raw Python error text, not translatable UI
