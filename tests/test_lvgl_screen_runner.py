@@ -40,8 +40,10 @@ def test_translate_event_button_selected_returns_index():
 
 
 def test_translate_event_back_and_power():
-    assert _translate_event(("topnav_back", -1, "topnav_back")) == RET_CODE__BACK_BUTTON
-    assert _translate_event(("topnav_power", -1, "topnav_power")) == RET_CODE__POWER_BUTTON
+    # Back/power ride the shared button_selected path carrying the RET_CODE sentinel in the
+    # index slot (canonical native shape); _translate_event returns it via the fall-through.
+    assert _translate_event(("button_selected", RET_CODE__BACK_BUTTON, "back")) == RET_CODE__BACK_BUTTON
+    assert _translate_event(("button_selected", RET_CODE__POWER_BUTTON, "power")) == RET_CODE__POWER_BUTTON
 
 
 def test_translate_event_text_entered_returns_string():
