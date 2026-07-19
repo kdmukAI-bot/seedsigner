@@ -8,9 +8,67 @@ from seedsigner.models.settings_definition import SettingsConstants, SettingsDef
 from seedsigner.views.view import ErrorView, MainMenuView
 from seedsigner.views import scan_views, seed_views, tools_views
 
+import hashlib
+from contextlib import contextmanager
+from unittest.mock import mock_open, patch
+
+from seedsigner.helpers import mnemonic_generation
+
+
+# Pin the inline image-entropy host sources (Pi CPU serial + time.time) so the otherwise
+# time-varying seed derivation in ToolsImageEntropyMnemonicLengthView is deterministic for
+# exact-vector assertions.
+@contextmanager
+def _pin_host(serial=b"DEADBEEFCAFE0123", t=1234.5):
+    cpuinfo = "processor\t: 0\nSerial\t\t: %s\n" % serial.decode()
+    real_open = open
+
+    def fake_open(path, *args, **kwargs):
+        if path == "/proc/cpuinfo":
+            return mock_open(read_data=cpuinfo)()
+        return real_open(path, *args, **kwargs)
+
+    with patch("builtins.open", side_effect=fake_open), patch("time.time", return_value=t):
+        yield (serial, t)
+
+
+def _expected_entropy(preview_frame_entropy, final_image_bytes, serial, t):
+    # Mirror the inline derivation's running chain: serial -> +time -> +preview-frame entropy ->
+    # +final image.
+    entropy = hashlib.sha256(serial).digest()
+    entropy = hashlib.sha256(entropy + str(t).encode()).digest()
+    entropy = hashlib.sha256(entropy + preview_frame_entropy).digest()
+    return hashlib.sha256(entropy + final_image_bytes).digest()
 
 
 class TestToolsFlows(FlowTest):
+
+    def test_image_entropy_mnemonic_length_seed_derivation(self):
+        """The image-entropy seed derivation lives inline in ToolsImageEntropyMnemonicLengthView as
+        one running SHA-256 chain: serial -> +time -> +preview-frame entropy -> +final image (first
+        16 bytes for 12 words). Drive the view with a pinned native camera result + pinned host
+        serial/time and confirm the generated pending seed matches, for both lengths."""
+        controller = Controller.get_instance()
+        preview_frame_entropy = bytes(range(32))
+        final_image_bytes = b"\xab\xcd\xef\x12" * 16   # stand-in RGB565 latched frame
+
+        # 12-word: run_button_list_screen returns index 0 (TWELVE_WORDS)
+        controller.image_entropy_native_result = (preview_frame_entropy, final_image_bytes)
+        view = tools_views.ToolsImageEntropyMnemonicLengthView()
+        with _pin_host() as (serial, t), patch.object(view, "run_button_list_screen", return_value=0):
+            view.run()
+        expected_12 = mnemonic_generation.generate_mnemonic_from_bytes(
+            _expected_entropy(preview_frame_entropy, final_image_bytes, serial, t)[:16])
+        assert controller.storage.get_pending_seed().mnemonic_list == expected_12
+
+        # 24-word: run_button_list_screen returns index 1 (TWENTYFOUR_WORDS)
+        controller.image_entropy_native_result = (preview_frame_entropy, final_image_bytes)
+        view = tools_views.ToolsImageEntropyMnemonicLengthView()
+        with _pin_host() as (serial, t), patch.object(view, "run_button_list_screen", return_value=1):
+            view.run()
+        expected_24 = mnemonic_generation.generate_mnemonic_from_bytes(
+            _expected_entropy(preview_frame_entropy, final_image_bytes, serial, t))
+        assert controller.storage.get_pending_seed().mnemonic_list == expected_24
 
     def test_dice_entropy_entry_uses_native_keyboard_cfg(self):
         """ToolsDiceEntropyEntryView drives the native keyboard_screen with digit keys 1-6 and a

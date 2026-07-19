@@ -1,4 +1,4 @@
-"""Unit tests for the native image-entropy drive loop (`run_image_entropy_screen`) in
+"""Unit tests for the native image-entropy drive loop (`run_camera_entropy`) in
 `seedsigner.gui.lvgl_screen_runner`.
 
 MicroPython-only in production (the View gates it by `IS_MICROPYTHON`); driven here on CPython
@@ -67,7 +67,7 @@ def test_image_entropy_capture_accept_returns_chain_and_frame(monkeypatch):
     fake_cam = _FakeCameraEntropy()
     _patch(monkeypatch, fake_lv, fake_cam)
 
-    result = lvgl_screen_runner.run_image_entropy_screen()
+    result = lvgl_screen_runner.run_camera_entropy()
 
     assert result == (b"C" * 32, b"F" * 8)
     # Overlay strings must be handed over (localized) before the camera starts, or the native
@@ -100,7 +100,7 @@ def test_image_entropy_cancel_during_preview_returns_none(monkeypatch):
     fake_cam = _FakeCameraEntropy()
     _patch(monkeypatch, fake_lv, fake_cam)
 
-    result = lvgl_screen_runner.run_image_entropy_screen()
+    result = lvgl_screen_runner.run_camera_entropy()
 
     assert result is None
     assert "capture" not in fake_cam.calls   # back must NOT be read as a capture
@@ -115,7 +115,7 @@ def test_image_entropy_preview_back_legacy_topnav_kind_also_cancels(monkeypatch)
     fake_cam = _FakeCameraEntropy()
     _patch(monkeypatch, fake_lv, fake_cam)
 
-    result = lvgl_screen_runner.run_image_entropy_screen()
+    result = lvgl_screen_runner.run_camera_entropy()
 
     assert result is None
     assert "capture" not in fake_cam.calls
@@ -134,7 +134,7 @@ def test_image_entropy_reshoot_then_accept(monkeypatch):
     fake_cam = _FakeCameraEntropy()
     _patch(monkeypatch, fake_lv, fake_cam)
 
-    result = lvgl_screen_runner.run_image_entropy_screen()
+    result = lvgl_screen_runner.run_camera_entropy()
 
     assert result == (b"C" * 32, b"F" * 8)
     assert "resume" in fake_cam.calls        # reshot at least once
@@ -146,7 +146,7 @@ def test_image_entropy_camera_start_failure_returns_none(monkeypatch):
     fake_cam = _FakeCameraEntropy(start_raises=True)
     _patch(monkeypatch, fake_lv, fake_cam)
 
-    result = lvgl_screen_runner.run_image_entropy_screen()
+    result = lvgl_screen_runner.run_camera_entropy()
 
     assert result is None
     # Screensaver restored even though start() failed.

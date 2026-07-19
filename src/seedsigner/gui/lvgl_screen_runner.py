@@ -1195,19 +1195,21 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
             _lv.set_screensaver_timeout(_screensaver_timeout_ms)
 
 
-def run_image_entropy_screen(*, seed_hash=None, allow_screensaver=False):
+def run_camera_entropy(*, seed_hash=None):
     """Drive the native image-entropy capture pipeline (MicroPython / ESP32).
 
     Mirrors ``run_camera_scan``: the native ``camera_entropy`` module owns the live preview +
     overlay; Python drives the documented host loop (see modcamera_entropy.c):
 
         start(seed_hash) -> live preview (poll frames_chained for progress) -> capture() ->
-        poll get_result() -> (chain, frame) -> stop()  [or resume() to reshoot]
+        poll get_result() -> (preview_frame_entropy, final_image_bytes) -> stop()  [or resume() to reshoot]
 
     The firmware chains the preview frames (SHA-256) EXCLUDING the latched final frame; the caller
-    derives the seed via ``generate_mnemonic_from_camera_entropy`` (entropy = sha256(chain+frame)).
+    (ToolsImageEntropyMnemonicLengthView) derives the seed inline from
+    (preview_frame_entropy, final_image_bytes) + host entropy.
 
-    Returns the ``(chain, frame)`` bytes tuple on accept, or ``None`` on cancel / camera bring-up
+    Returns the (preview_frame_entropy, final_image_bytes) bytes tuple on accept, or None on cancel
+    / camera bring-up
     failure (the caller recovers to the previous screen). ``seed_hash`` is an optional 32-byte
     caller-uniqueness seed (NOT the entropy source — the camera frames are); the app passes None.
 
@@ -1227,8 +1229,9 @@ def run_image_entropy_screen(*, seed_hash=None, allow_screensaver=False):
 
     # The camera preview isn't LVGL "input activity", so suspend the idle screensaver for the
     # capture's duration (0 disables; runtime-updatable), then restore — same as run_camera_scan.
-    if not allow_screensaver:
-        _lv.set_screensaver_timeout(0)
+    # TODO (same as run_camera_scan): move this into the native camera_entropy overlay via
+    # SS_OBJ_FLAG_NO_SCREENSAVER, then drop the override and the outer try/finally that restores it.
+    _lv.set_screensaver_timeout(0)
     try:
         # The native overlay holds no strings; hand it the two touch labels already translated
         # (mirrors the PIL ToolsImageEntropyLivePreviewScreen). Nothing is hardcoded in firmware,
@@ -1271,7 +1274,7 @@ def run_image_entropy_screen(*, seed_hash=None, allow_screensaver=False):
                     result = camera_entropy.get_result()
                     if result is None:
                         time.sleep_ms(5)
-                chain, frame, _n = result
+                preview_frame_entropy, final_image_bytes, _n = result
 
                 # --- Review phase: accept the frozen frame, or reshoot (resume + loop). ---
                 while True:
@@ -1285,14 +1288,13 @@ def run_image_entropy_screen(*, seed_hash=None, allow_screensaver=False):
                             camera_entropy.resume()        # reshoot -> back to preview
                             break
                         if event[0] == "button_selected":
-                            return (chain, frame)          # accept
+                            return (preview_frame_entropy, final_image_bytes)  # accept
                     else:
                         time.sleep_ms(20)
         finally:
             camera_entropy.stop()
     finally:
-        if not allow_screensaver:
-            _lv.set_screensaver_timeout(_screensaver_timeout_ms)
+        _lv.set_screensaver_timeout(_screensaver_timeout_ms)
 
 
 def run_seed_address_verification_screen(*, address, type_network, network, title,

@@ -63,29 +63,6 @@ def generate_mnemonic_from_bytes(entropy_bytes, wordlist_language_code: str = Se
 
 
 
-def generate_mnemonic_from_camera_entropy(chain: bytes, frame: bytes, mnemonic_length: int, wordlist_language_code: str = SettingsConstants.WORDLIST_LANGUAGE__ENGLISH) -> list[str]:
-    """Derive a BIP-39 mnemonic from the native ``camera_entropy`` result (ESP32 image entropy).
-
-    The firmware returns a running SHA-256 ``chain`` over the optional caller seed + the preview
-    frames — EXCLUDING the latched final image — plus the latched RGB565 ``frame``. The entropy is
-    ``SHA-256(chain + frame)``, which mirrors the PIL image-entropy scheme's final step (chain the
-    preview frames, then fold in the full-res final image): the same composition, so the camera
-    frames remain the entropy source and the final frame is the headline contribution.
-
-    12-word seeds use the first 128 bits / 16 bytes, matching ``generate_mnemonic_from_bytes``
-    truncation in the PIL path. (The PIL path additionally folds in the Pi CPU serial + a
-    timestamp as supplementary, non-secret starting bytes; those are deliberately dropped here —
-    the camera-frame chain is the entropy foundation and a public serial / low-entropy timestamp
-    do not materially strengthen it.)
-    """
-    entropy = hashlib.sha256(chain + frame).digest()
-    if mnemonic_length == 12:
-        # 12-word mnemonic only uses the first 128 bits / 16 bytes of entropy
-        entropy = entropy[:16]
-    return generate_mnemonic_from_bytes(entropy, wordlist_language_code)
-
-
-
 def generate_mnemonic_from_dice(roll_data: str, wordlist_language_code: str = SettingsConstants.WORDLIST_LANGUAGE__ENGLISH) -> list[str]:
     """
         Takes a string of 50 or 99 dice rolls and returns a 12- or 24-word mnemonic.
