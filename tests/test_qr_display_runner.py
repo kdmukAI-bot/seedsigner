@@ -131,7 +131,7 @@ def _patch_common(monkeypatch, fake_lv, fake_settings, is_micropython=True):
 def test_run_qr_display_static_builds_cfg_and_exits(monkeypatch):
     fake_lv = MagicMock()
     # First poll returns the exit event -> no animation, no sleep.
-    fake_lv.poll_for_result.return_value = ("topnav_back", -1, "qr_display_done")
+    fake_lv.poll_for_result.return_value = ("button_selected", lvgl_screen_runner.RET_CODE__BACK_BUTTON, "qr_display_done")
     fake_settings = _FakeSettings()
     _patch_common(monkeypatch, fake_lv, fake_settings)
 
@@ -157,7 +157,7 @@ def test_run_qr_display_brightness_persists_and_restarts(monkeypatch):
     # A brightness change, then the exit.
     fake_lv.poll_for_result.side_effect = [
         ("qr_brightness", 200, ""),
-        ("topnav_back", -1, "qr_display_done"),
+        ("button_selected", lvgl_screen_runner.RET_CODE__BACK_BUTTON, "qr_display_done"),
     ]
     fake_settings = _FakeSettings()
     _patch_common(monkeypatch, fake_lv, fake_settings)
@@ -173,7 +173,7 @@ def test_run_qr_display_brightness_persists_and_restarts(monkeypatch):
 def test_run_qr_display_animated_pushes_frame_when_tip_inactive(monkeypatch):
     fake_lv = MagicMock()
     # No result yet (drive the animation branch) then exit on the 2nd poll.
-    fake_lv.poll_for_result.side_effect = [None, ("topnav_back", -1, "qr_display_done")]
+    fake_lv.poll_for_result.side_effect = [None, ("button_selected", lvgl_screen_runner.RET_CODE__BACK_BUTTON, "qr_display_done")]
     fake_lv.qr_display_is_tip_active.return_value = False
     fake_settings = _FakeSettings()
     _patch_common(monkeypatch, fake_lv, fake_settings)
@@ -189,7 +189,7 @@ def test_run_qr_display_animated_pushes_frame_when_tip_inactive(monkeypatch):
 
 def test_run_qr_display_animated_holds_when_tip_active(monkeypatch):
     fake_lv = MagicMock()
-    fake_lv.poll_for_result.side_effect = [None, ("topnav_back", -1, "qr_display_done")]
+    fake_lv.poll_for_result.side_effect = [None, ("button_selected", lvgl_screen_runner.RET_CODE__BACK_BUTTON, "qr_display_done")]
     fake_lv.qr_display_is_tip_active.return_value = True   # tip up -> hold, don't advance
     fake_settings = _FakeSettings()
     _patch_common(monkeypatch, fake_lv, fake_settings)
@@ -212,7 +212,7 @@ class _FakeFountainEncoder(_FakeEncoder):
 
 def test_run_qr_display_offers_density_control_for_fountain_encoder(monkeypatch):
     fake_lv = MagicMock()
-    fake_lv.poll_for_result.return_value = ("topnav_back", -1, "qr_display_done")
+    fake_lv.poll_for_result.return_value = ("button_selected", lvgl_screen_runner.RET_CODE__BACK_BUTTON, "qr_display_done")
     fake_settings = _FakeSettings()
     _patch_common(monkeypatch, fake_lv, fake_settings)
 
@@ -226,7 +226,7 @@ def test_run_qr_display_offers_density_control_for_fountain_encoder(monkeypatch)
 
 def test_run_qr_display_omits_density_control_for_fixed_qr(monkeypatch):
     fake_lv = MagicMock()
-    fake_lv.poll_for_result.return_value = ("topnav_back", -1, "qr_display_done")
+    fake_lv.poll_for_result.return_value = ("button_selected", lvgl_screen_runner.RET_CODE__BACK_BUTTON, "qr_display_done")
     fake_settings = _FakeSettings()
     _patch_common(monkeypatch, fake_lv, fake_settings)
 
@@ -241,7 +241,7 @@ def test_run_qr_display_density_change_resplits_and_persists(monkeypatch):
     fake_lv = MagicMock()
     fake_lv.poll_for_result.side_effect = [
         ("qr_density", 3, ""),
-        ("topnav_back", -1, "qr_display_done"),
+        ("button_selected", lvgl_screen_runner.RET_CODE__BACK_BUTTON, "qr_display_done"),
     ]
     fake_settings = _FakeSettings()
     _patch_common(monkeypatch, fake_lv, fake_settings)
@@ -275,7 +275,7 @@ def _patch_cpython(monkeypatch, fake_lv, fake_settings):
 def test_run_qr_display_cpython_installs_and_clears_flush_callback(monkeypatch):
     fake_lv = MagicMock()
     # Drive one animation iteration (pump + frame push), then exit.
-    fake_lv.poll_for_result.side_effect = [None, ("topnav_back", -1, "qr_display_done")]
+    fake_lv.poll_for_result.side_effect = [None, ("button_selected", lvgl_screen_runner.RET_CODE__BACK_BUTTON, "qr_display_done")]
     fake_lv.qr_display_is_tip_active.return_value = False
     fake_settings = _FakeSettings()
     _patch_cpython(monkeypatch, fake_lv, fake_settings)
@@ -294,7 +294,7 @@ def test_run_qr_display_cpython_installs_and_clears_flush_callback(monkeypatch):
 
 def test_run_qr_display_cpython_stops_loading_pump_and_resets_input_timer(monkeypatch):
     fake_lv = MagicMock()
-    fake_lv.poll_for_result.return_value = ("topnav_back", -1, "qr_display_done")
+    fake_lv.poll_for_result.return_value = ("button_selected", lvgl_screen_runner.RET_CODE__BACK_BUTTON, "qr_display_done")
     fake_settings = _FakeSettings()
     _patch_cpython(monkeypatch, fake_lv, fake_settings)
 

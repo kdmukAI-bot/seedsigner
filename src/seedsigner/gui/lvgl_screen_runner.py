@@ -172,26 +172,23 @@ def _translate_event(event):
     """Map an LVGL result event tuple to a SeedSigner return code.
 
     LVGL events:
-        ("button_selected", index, label)
-        ("topnav_back", -1, "topnav_back")
-        ("topnav_power", -1, "topnav_power")
+        ("button_selected", index, label)     # index: a 0-based button position, OR a
+                                               #   reserved sentinel (back=1000, power=1001,
+                                               #   screensaver_dismiss=1100, splash=1101)
         ("text_entered", -1, text)            # e.g. a confirmed passphrase
         ("qr_brightness", 31..255, "")        # QR-display brightness change (mid-screen)
         ("qr_density", 3..6, "")              # QR-display density change (mid-screen)
 
     SeedSigner return codes:
         int index (0, 1, 2, ...) for button selection
-        RET_CODE__BACK_BUTTON (1000) for back
-        RET_CODE__POWER_BUTTON (1001) for power
+        RET_CODE__BACK_BUTTON (1000) for back, RET_CODE__POWER_BUTTON (1001) for power —
+            both ride the shared button_selected path with the sentinel in the index slot
+            (the native sentinels equal these RET_CODE values), so they fall through as index.
         str text for a confirmed text-entry screen
         QRBrightnessEvent for a QR-display brightness change (not a terminal result)
         QRDensityEvent for a QR-display density change (not a terminal result)
     """
     kind, index, label = event
-    if kind == "topnav_back":
-        return RET_CODE__BACK_BUTTON
-    if kind == "topnav_power":
-        return RET_CODE__POWER_BUTTON
     if kind == "text_entered":
         # String-valued result (text-entry screens): the entered text rides in
         # the label slot; hand it back to the caller as the string it is.
@@ -743,9 +740,10 @@ def _make_scan_should_continue():
     """Build the ``should_continue`` callable that ends a scan on user cancel.
 
     During a scan the native camera overlay's back button is the only producer
-    feeding the shared UI event queue, so any event drained here (a top-nav back or
-    the overlay's back button) means the user backed out. Returns False to cancel,
-    mirroring the Pi Zero KEY_LEFT semantics.
+    feeding the shared UI event queue, so any event drained here (the overlay's back
+    button, surfaced as a button_selected carrying the RET_CODE__BACK_BUTTON sentinel)
+    means the user backed out. Returns False to cancel, mirroring the Pi Zero KEY_LEFT
+    semantics.
 
     The hardware/joystick back source converges on this same signal once the native
     scan path reaches a device with physical buttons (the Pi at the PIL cutover);
@@ -760,7 +758,7 @@ def _make_scan_should_continue():
             event = _lv.poll_for_result()
             if event is None:
                 return True
-            if event[0] in ("topnav_back", "button_selected"):
+            if event[0] == "button_selected":
                 return False
     return should_continue
 
@@ -1300,7 +1298,7 @@ def run_camera_entropy(*, seed_hash=None):
                         # in the index slot. Test back FIRST — it's a subset of
                         # button_selected, so the generic branch would otherwise swallow it
                         # and mis-fire a capture.
-                        if event[0] == "topnav_back" or event[1] == RET_CODE__BACK_BUTTON:
+                        if event[1] == RET_CODE__BACK_BUTTON:
                             return None  # cancelled during preview -> hand control back to the View
                         if event[0] == "button_selected":
                             camera_entropy.capture()
@@ -1324,7 +1322,7 @@ def run_camera_entropy(*, seed_hash=None):
                         # "button_selected" kind with the Accept button and is told apart only
                         # by the RET_CODE__BACK_BUTTON index sentinel. Test back FIRST so it
                         # can't be misread as an accept.
-                        if event[0] == "topnav_back" or event[1] == RET_CODE__BACK_BUTTON:
+                        if event[1] == RET_CODE__BACK_BUTTON:
                             camera_entropy.resume()        # reshoot -> back to preview
                             break
                         if event[0] == "button_selected":

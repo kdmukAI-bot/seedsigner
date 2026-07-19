@@ -84,12 +84,10 @@ def test_image_entropy_capture_accept_returns_chain_and_frame(monkeypatch):
     assert fake_lv.set_screensaver_timeout.call_args_list[-1][0][0] == 60000
 
 
-# The native overlay's back arrow does NOT arrive as a distinct "topnav_back" kind on the
-# ESP32 poll queue — it comes through as a button_selected carrying the RET_CODE__BACK_BUTTON
-# sentinel in the index slot (back_button() -> on_button_selected(SEEDSIGNER_RET_BACK_BUTTON,
-# "back")). This is the real device event shape; the earlier tests used an idealized
-# ("topnav_back", ...) tuple that never actually occurs, which is why the back arrow was being
-# misread as a capture/accept.
+# The native overlay's back arrow arrives as a button_selected carrying the
+# RET_CODE__BACK_BUTTON sentinel in the index slot (back_button() ->
+# on_button_selected(SEEDSIGNER_RET_BACK_BUTTON, "back")), not a distinct "topnav_back" kind.
+# Both platforms surface it this way.
 BACK_EVENT = ("button_selected", lvgl_screen_runner.RET_CODE__BACK_BUTTON, "back")
 
 
@@ -105,20 +103,6 @@ def test_image_entropy_cancel_during_preview_returns_none(monkeypatch):
     assert result is None
     assert "capture" not in fake_cam.calls   # back must NOT be read as a capture
     assert fake_cam.calls[-1] == "stop"      # still cleaned up
-
-
-def test_image_entropy_preview_back_legacy_topnav_kind_also_cancels(monkeypatch):
-    # Defensive: a future/desktop build that surfaces back as a real "topnav_back" kind
-    # (index-less) must still cancel — the runner checks both the kind and the sentinel.
-    fake_lv = MagicMock()
-    fake_lv.poll_for_result.side_effect = [("topnav_back", -1, "back")]
-    fake_cam = _FakeCameraEntropy()
-    _patch(monkeypatch, fake_lv, fake_cam)
-
-    result = lvgl_screen_runner.run_camera_entropy()
-
-    assert result is None
-    assert "capture" not in fake_cam.calls
 
 
 def test_image_entropy_reshoot_then_accept(monkeypatch):
