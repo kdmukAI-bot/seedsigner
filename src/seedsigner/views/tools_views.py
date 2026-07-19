@@ -58,33 +58,26 @@ class ToolsMenuView(View):
 ****************************************************************************"""
 class ToolsImageEntropyLivePreviewView(View):
     def run(self):
-        if IS_MICROPYTHON:
-            # Native camera_entropy (ESP32): the module owns the live preview + capture +
-            # frozen-frame review in one overlay, so it collapses the PIL preview + separate
-            # final-image capture/review into a single drive loop. It returns the (chain, frame)
-            # bytes on accept; the mnemonic-length View derives the seed from them. Skip the PIL
-            # ToolsImageEntropyFinalImageView (its capture/review is handled natively).
-            from seedsigner.gui.lvgl_screen_runner import run_image_entropy_screen
-            self.controller.image_entropy_native_result = None
-            result = run_image_entropy_screen()
-            if result is None:
-                # Cancelled, or native camera bring-up failed -> recover to the previous screen.
-                return Destination(BackStackView)
-            self.controller.image_entropy_native_result = result
-            return Destination(ToolsImageEntropyMnemonicLengthView, skip_current_view=True)
-
-        from seedsigner.gui.screens.tools_screens import ToolsImageEntropyLivePreviewScreen
-        self.controller.image_entropy_preview_frames = None
-        ret = self.run_screen(ToolsImageEntropyLivePreviewScreen)
-
-        if ret == RET_CODE__BACK_BUTTON:
+        # Image entropy runs through the native camera_entropy module on both platforms: it owns
+        # the live preview + capture + frozen-frame review in one overlay (preview, capture, and
+        # review in a single drive loop). It returns the (preview_frame_entropy, final_image_bytes)
+        # bytes on accept, and
+        # ToolsImageEntropyMnemonicLengthView derives the seed from them.
+        from seedsigner.gui.lvgl_screen_runner import run_camera_entropy
+        self.controller.image_entropy_native_result = None
+        result = run_camera_entropy()
+        if result is None:
+            # Cancelled, or native camera bring-up failed -> recover to the previous screen.
             return Destination(BackStackView)
-
-        self.controller.image_entropy_preview_frames = ret
-        return Destination(ToolsImageEntropyFinalImageView)
-
+        self.controller.image_entropy_native_result = result
+        return Destination(ToolsImageEntropyMnemonicLengthView, skip_current_view=True)
 
 
+
+# TODO: dead code — remove in the picamera sweep. The native camera_entropy overlay
+# (run_camera_entropy) presents the frozen final image as part of its capture -> review flow, so
+# this PIL final-image capture/review view is redundant. Pending on-device confirmation that the
+# LVGL screen presents the final image correctly, this view and its PIL capture path get deleted.
 class ToolsImageEntropyFinalImageView(View):
     def run(self):
         from PIL import Image
@@ -150,78 +143,90 @@ class ToolsImageEntropyMnemonicLengthView(View):
         mnemonic_length = button_data[selected_menu_num].return_data
         wordlist_language_code = self.settings.get_value(SettingsConstants.SETTING__WORDLIST_LANGUAGE)
 
+        preview_frame_entropy, final_image_bytes = self.controller.image_entropy_native_result
+
+        # Generate a BIP-39 mnemonic from entropy derived from the camera.
+        #
+        # The seed entropy is assembled by hashing several inputs together, each folded on top of
+        # the running result:
+        #   1. small platform-specific extras — a CPU serial number, milliseconds since power-on,
+        #      and any device-baked random data;
+        #   2. every low-resolution live preview frame — the whole preview video — chained
+        #      together with SHA-256;
+        #   3. the full-resolution final image.
+        # The resulting 256-bit hash is the seed entropy.
+        #
+        # Chaining this way means no single source can weaken the result: as long as any one of
+        # them is unpredictable, the final value is unpredictable. The real entropy is the camera
+        # itself — both the preview-frame entropy and the final image, either of which alone already
+        # carries far more than enough — while the platform extras are just extra assurance,
+        # nothing the seed relies on.
+        #
+        # Before hashing, the final image gets basic sanity checks — right size, not an empty or
+        # uninitialized buffer. They deliberately do NOT judge how "random" it looks: a nearly-black
+        # final image of pure sensor noise is still fine, and a brightness or variance test would
+        # wrongly reject good captures. We reject a dead final image, never a dim one.
+
+        # Sanity checks: confirm a real image actually arrived; never derive a seed from a bad
+        # buffer. Raise loudly (hard fail) rather than silently produce a degraded seed.
+        # The preview-frame entropy is a SHA-256 hash: 32 bytes, and never all zeros.
+        if len(preview_frame_entropy) != 32 or preview_frame_entropy == bytes(32):
+            raise ValueError("Camera preview-frame entropy is empty; capture failed")
+
+        # Reject a final image that is empty or every byte identical (all zeros, all 0xFF, any solid fill).
+        if not final_image_bytes or final_image_bytes == bytes([final_image_bytes[0]]) * len(final_image_bytes):
+            raise ValueError("Camera entropy final image is uninitialized; capture failed")
+
+        # TODO: also confirm the exact final-image length (WIDTH*HEIGHT*2) once the per-platform
+        # capture dimensions are pinned — Pi = 240x240 (115200 bytes); ESP32-P4 dims TBD (see the plan).
+
+        # Combine everything into the seed entropy as one running SHA-256 chain, weakest first.
+
+        #   1. Seed the chain with small platform-specific extras: a device id, then the current
+        #      time. Best-effort (skip any source we cannot read); the camera images below are the
+        #      real entropy, so these extras only add insurance.
         if IS_MICROPYTHON:
-            # Native camera_entropy (ESP32): the firmware already chained the preview frames
-            # (SHA-256); the entropy is sha256(chain + latched_frame). This is a single hash, so
-            # no "Calculating..." spinner is needed (unlike the PIL path, which re-hashes the full
-            # frame buffer here).
-            chain, frame = self.controller.image_entropy_native_result
-            mnemonic = mnemonic_generation.generate_mnemonic_from_camera_entropy(
-                chain, frame, mnemonic_length, wordlist_language_code=wordlist_language_code)
+            # ESP32: the chip's unique id, then milliseconds since power-on.
+            try:
+                import machine
+                seed_entropy = hashlib.sha256(bytes(machine.unique_id())).digest()
+                seed_entropy = hashlib.sha256(seed_entropy + str(time.ticks_ms()).encode()).digest()
+            except Exception:
+                seed_entropy = hashlib.sha256(b"").digest()
+        else:
+            # Raspberry Pi: read the CPU's unique serial number from /proc/cpuinfo.
+            serial_number = b""
+            try:
+                with open("/proc/cpuinfo") as cpuinfo:
+                    for line in cpuinfo.read().splitlines():
+                        if line.startswith("Serial"):
+                            serial_number = line.split(":")[-1].strip().encode()
+                            break
+            except Exception:
+                pass
+            # Build in some hardware-level uniqueness via the CPU's unique serial number.
+            seed_entropy = hashlib.sha256(serial_number).digest()
+            # Build in modest additional entropy via the milliseconds since power-on.
+            seed_entropy = hashlib.sha256(seed_entropy + str(time.time()).encode()).digest()
 
-            # Entropy should never stick around in memory
-            self.controller.image_entropy_native_result = None
-            chain = None
-            frame = None
-            mnemonic_bytes = None
+        #   2. Chain in the camera's running preview-frame entropy — the whole preview video.
+        seed_entropy = hashlib.sha256(seed_entropy + preview_frame_entropy).digest()
 
-            seed = Seed(mnemonic, wordlist_language_code=wordlist_language_code)
-            self.controller.storage.set_pending_seed(seed)
+        #   3. Finally build in the headline entropy: the full-resolution final image.
+        seed_entropy = hashlib.sha256(seed_entropy + final_image_bytes).digest()
 
-            # Cannot return BACK to this View
-            return Destination(SeedWordsWarningView, view_args={"seed_num": None}, clear_history=True)
-
-        # The entropy calculation can take time, especially with a full image buffer.
-        # Show a loading spinner to provide feedback during this delay. Fire-and-forget:
-        # the next screen's run_screen tears the spinner down.
-        from seedsigner.gui.lvgl_screen_runner import run_loading_screen
-        run_loading_screen(_("Calculating..."))
-
-        preview_images = self.controller.image_entropy_preview_frames
-        seed_entropy_image = self.controller.image_entropy_final_image
-
-        # Build in some hardware-level uniqueness via CPU unique Serial num
-        try:
-            serial_num = b''
-            with open("/proc/cpuinfo", "r") as f:
-                for line in f:
-                    if "Serial" in line:
-                        serial_num = line.split(":")[-1].strip().encode('utf-8')
-                        break
-            serial_hash = hashlib.sha256(serial_num)
-            hash_bytes = serial_hash.digest()
-        except Exception as e:
-            logger.info(repr(e), exc_info=True)
-            hash_bytes = b'0'
-
-        # Build in modest entropy via millis since power on
-        millis_hash = hashlib.sha256(hash_bytes + str(time.time()).encode('utf-8'))
-        hash_bytes = millis_hash.digest()
-
-        # Build in better entropy by chaining the preview frames
-        for frame in preview_images:
-            img_hash = hashlib.sha256(hash_bytes + frame.tobytes())
-            hash_bytes = img_hash.digest()
-
-        # Finally build in our headline entropy via the new full-res image
-        final_hash = hashlib.sha256(hash_bytes + seed_entropy_image.tobytes()).digest()
-
+        # A 12-word mnemonic uses the first 128 bits (16 bytes); 24 words uses all 256 bits.
         if mnemonic_length == 12:
-            # 12-word mnemonic only uses the first 128 bits / 16 bytes of entropy
-            final_hash = final_hash[:16]
+            seed_entropy = seed_entropy[:16]
 
-        # Generate the mnemonic
-        mnemonic = mnemonic_generation.generate_mnemonic_from_bytes(final_hash)
+        mnemonic = mnemonic_generation.generate_mnemonic_from_bytes(seed_entropy, wordlist_language_code)
 
-        # Image should never get saved nor stick around in memory
-        seed_entropy_image = None
-        preview_images = None
-        final_hash = None
-        hash_bytes = None
-        self.controller.image_entropy_preview_frames = None
-        self.controller.image_entropy_final_image = None
+        # Entropy should never stick around in memory
+        self.controller.image_entropy_native_result = None
+        preview_frame_entropy = None
+        final_image_bytes = None
+        seed_entropy = None
 
-        # Add the mnemonic as an in-memory Seed
         seed = Seed(mnemonic, wordlist_language_code=wordlist_language_code)
         self.controller.storage.set_pending_seed(seed)
 
