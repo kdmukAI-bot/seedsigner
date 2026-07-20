@@ -1311,10 +1311,12 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
 
 
 def run_camera_entropy(*, seed_hash=None):
-    """Drive the native image-entropy capture pipeline (MicroPython / ESP32).
+    """Drive the native image-entropy capture pipeline on either hardware target.
 
-    Mirrors ``run_camera_scan``: the native ``camera_entropy`` module owns the live preview +
-    overlay; Python drives the documented host loop (see modcamera_entropy.c):
+    Mirrors ``run_camera_scan`` in both halves: the native ``camera_entropy`` module owns the
+    live preview + overlay on both platforms, and — like every CPython flow — the Pi additionally
+    installs the PIL flush callback and pumps LVGL itself (see ``_tick`` below), since it has no
+    firmware display task. Python drives the documented host loop (see modcamera_entropy.c):
 
         start(seed_hash) -> live preview (poll frames_chained for progress) -> capture() ->
         poll get_result() -> (preview_frame_entropy, final_image_bytes) -> stop()  [or resume() to reshoot]
@@ -1341,12 +1343,41 @@ def run_camera_entropy(*, seed_hash=None):
     import camera_entropy
     from seedsigner.compat.l10n import gettext as _
 
+    # On the Pi, LVGL pixels reach the panel only through the PIL driver's flush callback,
+    # and LVGL only advances when Python pumps it — exactly as run_camera_scan. Missing
+    # either does NOT merely stale the screen; it breaks three things at once, which is
+    # why an unpumped flow reads as a total freeze: the render/flush, the native
+    # camera_engine_pump_consume() hook (the only path moving captured frames into the
+    # preview sink, so the preview stays blank however well the camera runs), and LVGL's
+    # input read (so no key registers and the flow cannot be exited). MicroPython's
+    # firmware display task owns rendering, so it neither installs a callback nor pumps.
+    renderer = None
+    if not IS_MICROPYTHON:
+        from seedsigner.gui.renderer import Renderer
+        renderer = Renderer.get_instance()
+
+    def _tick(ms):
+        """One idle iteration of a poll loop: advance LVGL, then wait.
+
+        The three loops below are otherwise pure `poll_for_result()` spins, so this is
+        the single place the Pi's pump lives — the CPython equivalent of the firmware
+        display task. A no-op pump on MicroPython, where that task already runs.
+        """
+        if renderer is not None:
+            with renderer.lock:
+                _lv.lvgl_pump(5, 1)
+        _sleep_ms(ms)
+
     # The camera preview isn't LVGL "input activity", so suspend the idle screensaver for the
     # capture's duration (0 disables; runtime-updatable), then restore — same as run_camera_scan.
     # TODO (same as run_camera_scan): move this into the native camera_entropy overlay via
     # SS_OBJ_FLAG_NO_SCREENSAVER, then drop the override and the outer try/finally that restores it.
     _lv.set_screensaver_timeout(0)
     try:
+        if renderer is not None:
+            with renderer.lock:
+                _lv.set_flush_mode("python")
+                _lv.set_flush_callback(_make_flush_callback(renderer.disp))
         # The native overlay holds no strings; hand it the two touch labels already translated
         # (mirrors the PIL ToolsImageEntropyLivePreviewScreen). Nothing is hardcoded in firmware,
         # so these must be set before the camera starts or the button/text render blank.
@@ -1380,14 +1411,16 @@ def run_camera_entropy(*, seed_hash=None):
                             camera_entropy.capture()
                             captured = True
                     else:
-                        _sleep_ms(20)
+                        _tick(20)
 
                 # --- Latch: wait for the frozen final frame to be ready + displayed. ---
                 result = None
                 while result is None:
                     result = camera_entropy.get_result()
                     if result is None:
-                        _sleep_ms(5)
+                        # Pump here too: the CAPTURING transient and the frozen confirm
+                        # frame are both painted by the native overlay during this wait.
+                        _tick(5)
                 preview_frame_entropy, final_image_bytes, _n = result
 
                 # --- Review phase: accept the frozen frame, or reshoot (resume + loop). ---
@@ -1404,10 +1437,12 @@ def run_camera_entropy(*, seed_hash=None):
                         if event[0] == "button_selected":
                             return (preview_frame_entropy, final_image_bytes)  # accept
                     else:
-                        _sleep_ms(20)
+                        _tick(20)
         finally:
             camera_entropy.stop()
     finally:
+        if renderer is not None:
+            _lv.set_flush_callback(None)
         _lv.set_screensaver_timeout(_screensaver_timeout_ms)
 
 
