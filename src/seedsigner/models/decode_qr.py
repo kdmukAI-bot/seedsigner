@@ -274,6 +274,29 @@ class DecodeQR:
 
 
     @property
+    def is_segmented(self) -> bool:
+        # Indexed animated-QR cycles (a fixed, numbered set of parts) drive the SEGMENTED
+        # progress bar — one cell per part, lit out-of-order. UR/fountain + single-frame QRs
+        # use the continuous bar. Mirrors the get_percent_complete() segmented branch.
+        return self.qr_type in [QRType.PSBT__SPECTER, QRType.PSBT__BBQR]
+
+
+    @property
+    def total_segments(self) -> int:
+        # Cycle size once the first frame reveals it; 0 until known / not applicable. Facade
+        # over the inner decoder so the scan loop needn't reach through .decoder.decoder.
+        if not self.decoder or getattr(self.decoder, "total_segments", None) is None:
+            return 0
+        return self.decoder.total_segments
+
+
+    @property
+    def last_part_number(self) -> int:
+        # 0-based index of the most-recently seen part (new OR repeat); -1 if none/not animated.
+        return getattr(self.decoder, "last_part_number", -1) if self.decoder else -1
+
+
+    @property
     def is_complete(self) -> bool:
         return self.complete
 
@@ -693,6 +716,9 @@ class BaseAnimatedQrDecoder(BaseQrDecoder):
     def __init__(self):
         super().__init__()
         self.segments = []
+        # 0-based index of the most-recently seen part (new OR repeat), for the segmented
+        # progress overlay's current-cell highlight. -1 until the first frame is added.
+        self.last_part_number = -1
 
     def current_segment_num(self, segment) -> int:
         raise Exception("Not implemented in child class")
@@ -715,6 +741,10 @@ class BaseAnimatedQrDecoder(BaseQrDecoder):
             raise Exception('Segment total changed unexpectedly')
 
         current_segment_num = self.current_segment_num(segment)
+        # Record the just-seen piece (0-based) for BOTH new and repeat frames, above the
+        # None check so it is set on PART_EXISTING too — the segmented overlay marks a
+        # re-read piece as the current cell (white), not just a new one.
+        self.last_part_number = current_segment_num - 1
         if self.segments[current_segment_num - 1] == None:
             self.segments[current_segment_num - 1] = self.parse_segment(segment)
             self.collected_segments += 1
