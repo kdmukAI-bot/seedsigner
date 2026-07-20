@@ -1,4 +1,5 @@
 import logging
+from seedsigner.compat import IS_MICROPYTHON
 from seedsigner.compat.l10n import gettext as _
 
 from seedsigner.gui.constants import GUIConstants, SeedSignerIconConstants, StatusType, ButtonStyle
@@ -7,6 +8,17 @@ from seedsigner.models.settings import Settings, SettingsConstants, SettingsDefi
 from .view import ButtonOption, Destination, MainMenuView, RET_CODE__BACK_BUTTON, View
 
 logger = logging.getLogger(__name__)
+
+
+def _is_disabled_on_this_hardware(attr_name: str) -> bool:
+    """
+        Whether a setting is present in the menu but inert on this platform, and so should
+        route to SettingsEntryDisabledView instead of its options list. One place to add
+        future hardware-divergent settings.
+    """
+    # Camera rotation reaches the camera through the Pi-only native set_camera_rotation
+    # binding; the ESP32 camera engines do not read the setting.
+    return IS_MICROPYTHON and attr_name == SettingsConstants.SETTING__CAMERA_ROTATION
 
 
 
@@ -105,6 +117,9 @@ class SettingsMenuView(View):
 
         elif settings_entries[selected_menu_num].attr_name == SettingsConstants.SETTING__LOCALE:
             return Destination(LocaleSelectionView)
+
+        elif _is_disabled_on_this_hardware(settings_entries[selected_menu_num].attr_name):
+            return Destination(SettingsEntryDisabledView, view_args=dict(attr_name=settings_entries[selected_menu_num].attr_name))
 
         else:
             return Destination(SettingsEntryUpdateSelectionView, view_args=dict(attr_name=settings_entries[selected_menu_num].attr_name, parent_initial_scroll=initial_scroll))
@@ -328,6 +343,39 @@ class SettingsSelectionRequiredWarningView(View):
         )
 
         return Destination(SettingsEntryUpdateSelectionView, view_args=dict(attr_name=self.settings_entry.attr_name))
+
+
+
+class SettingsEntryDisabledView(View):
+    """
+        Shown instead of the options list when a setting exists in SettingsDefinition but
+        the current hardware cannot act on it (e.g. camera rotation, which only the Pi's
+        native camera engines read). The entry stays visible in the settings menu so the
+        two platforms present the same list; selecting it explains the divergence rather
+        than offering a choice that would silently do nothing.
+    """
+    def __init__(self, attr_name: str):
+        super().__init__()
+        self.settings_entry = SettingsDefinition.get_settings_entry(attr_name)
+
+
+    def run(self):
+        # TRANSLATOR_NOTE: The name of the setting (e.g. "Camera rotation") will be inserted.
+        text = _("\"{}\" is not available on this hardware.").format(_(self.settings_entry.display_name))
+
+        # TRANSLATOR_NOTE: Text for the button that returns the user to the settings menu.
+        button_text = _("Return to Settings")
+
+        self.run_button_list_screen(
+            title=_("Settings"),
+            text=text,
+            button_data=[ButtonOption(button_text)],
+            is_bottom_list=True,
+        )
+
+        # The lone button and the back button lead to the same place, so the return value
+        # needs no inspection.
+        return Destination(SettingsMenuView)
 
 
 

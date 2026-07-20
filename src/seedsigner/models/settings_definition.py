@@ -778,7 +778,12 @@ class SettingsDefinition:
                       type=SettingsConstants.TYPE__SELECT_1,
                       visibility=SettingsConstants.VISIBILITY__ADVANCED,
                       selection_options=SettingsConstants.ALL_CAMERA_ROTATIONS,
-                      default_value=SettingsConstants.CAMERA_ROTATION__180),
+                      # The native camera engines rotate clockwise and already apply a 90°
+                      # sensor-mount base, which is correct alignment for the default build;
+                      # this setting is the delta added on top, so the default is no delta.
+                      # (The retired PIL path rotated counter-clockwise, where the
+                      # equivalent default was 180.)
+                      default_value=SettingsConstants.CAMERA_ROTATION__0),
 
         SettingsEntry(category=SettingsConstants.CATEGORY__FEATURES,
                       attr_name=SettingsConstants.SETTING__COMPACT_SEEDQR,
