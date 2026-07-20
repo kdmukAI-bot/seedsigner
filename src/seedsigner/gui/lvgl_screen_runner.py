@@ -750,7 +750,7 @@ def clear_screen():
         _lv.set_flush_callback(None)
 
 
-def _make_scan_should_continue():
+def _make_scan_should_continue(renderer=None):
     """Build the ``should_continue`` callable that ends a scan on user cancel.
 
     During a scan the native camera overlay's back button is the only producer
@@ -762,8 +762,11 @@ def _make_scan_should_continue():
     The hardware/joystick back source converges on this same signal once the native
     scan path reaches a device with physical buttons (the Pi at the PIL cutover);
     today this path is ESP32/touch-only, so only the touch queue feeds it.
+
+    ``renderer`` is the CPython blended-display renderer, or None on MicroPython. When
+    supplied, each tick also pumps LVGL under its lock — see should_continue below.
     """
-    def should_continue():
+    def drain():
         # Drain the UI event queue fully each tick: empty -> keep scanning; a
         # back/button event -> cancel. This is a different queue from the decoded-QR
         # ring that run_scan drains via camera_scanner.poll_new, so the two never
@@ -774,6 +777,23 @@ def _make_scan_should_continue():
                 return True
             if event[0] == "button_selected":
                 return False
+
+    if renderer is None:
+        # MicroPython: the firmware's display task renders and reads input on its own,
+        # so Python must not pump LVGL here — it would drive LVGL from two threads.
+        return drain
+
+    def should_continue():
+        # The Pi has no native display task (RASPI-5), so LVGL only advances when we pump
+        # it. Three things ride on this, which is why skipping it froze the whole scan
+        # rather than just staling the screen: the render/flush, camera_engine_pump_consume()
+        # (the hook that moves captured frames into the preview sink, so without it the
+        # preview stays blank however well the camera runs), and LVGL's input read, so the
+        # back button never registers. Pump before draining, so events this tick produces
+        # are seen by the drain rather than a tick late.
+        with renderer.lock:
+            _lv.lvgl_pump(5, 1)
+            return drain()
     return should_continue
 
 
@@ -825,8 +845,23 @@ def run_camera_scan(decoder):
     # does). lvgl-screens to-do: stamp that flag on the camera preview overlay (and the
     # camera_entropy twin). Once the native screen owns it, drop this override and the
     # outer try/finally that exists only to restore the timeout.
+    # On the Pi, LVGL pixels reach the panel only through the PIL driver's flush callback,
+    # and LVGL only advances when Python pumps it (both done in should_continue's tick).
+    # Install the callback for the scan's duration exactly as every other CPython flow
+    # does — each drops it again on the way out, so by the time we get here there is none
+    # installed and an unpumped/unflushed scan renders nothing. MicroPython's firmware
+    # display task owns rendering, so it neither installs a callback nor pumps.
+    renderer = None
+    if not IS_MICROPYTHON:
+        from seedsigner.gui.renderer import Renderer
+        renderer = Renderer.get_instance()
+
     _lv.set_screensaver_timeout(0)
     try:
+        if renderer is not None:
+            with renderer.lock:
+                _lv.set_flush_mode("python")
+                _lv.set_flush_callback(_make_flush_callback(renderer.disp))
         try:
             camera_scanner.start()
         except OSError as e:
@@ -843,11 +878,13 @@ def run_camera_scan(decoder):
             _lv.clear_result_queue()
             return run_scan(
                 decoder, scanner=camera_scanner,
-                should_continue=_make_scan_should_continue(),
+                should_continue=_make_scan_should_continue(renderer),
             )
         finally:
             camera_scanner.stop()
     finally:
+        if renderer is not None:
+            _lv.set_flush_callback(None)
         _lv.set_screensaver_timeout(_screensaver_timeout_ms)
 
 

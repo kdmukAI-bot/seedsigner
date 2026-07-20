@@ -310,3 +310,56 @@ def test_assemble_cfg_custom_status_forwards_hero_icon_and_color():
     assert cfg["warning_edges"] is True
     # The hero icon is top-level, NOT folded into top_nav.
     assert "icon" not in cfg["top_nav"]
+
+
+# ---------------------------------------------------------------------------
+# _make_scan_should_continue - per-tick pump + cancel drain
+# ---------------------------------------------------------------------------
+# The scan drive loop is shared by both platforms, so the pump has to be built in
+# per-platform: the Pi has no native display task, and pumping is what drives the
+# render/flush, camera_engine_pump_consume() (frames -> preview sink), and LVGL's
+# input read. On MicroPython the firmware display task owns all three, so pumping
+# from Python here would drive LVGL from two threads.
+
+def _fake_lv_for_scan(monkeypatch, events):
+    lv = MagicMock()
+    lv.poll_for_result.side_effect = list(events)
+    monkeypatch.setattr(lvgl_screen_runner, "_lv", lv)
+    return lv
+
+
+def test_scan_should_continue_pumps_under_the_renderer_lock_on_cpython(monkeypatch):
+    lv = _fake_lv_for_scan(monkeypatch, [None])
+    renderer = MagicMock()
+
+    should_continue = lvgl_screen_runner._make_scan_should_continue(renderer)
+
+    assert should_continue() is True
+    lv.lvgl_pump.assert_called_once_with(5, 1)
+    renderer.lock.__enter__.assert_called_once()
+    renderer.lock.__exit__.assert_called_once()
+
+
+def test_scan_should_continue_does_not_pump_on_micropython(monkeypatch):
+    """No renderer -> MicroPython, where the native display task pumps LVGL itself."""
+    lv = _fake_lv_for_scan(monkeypatch, [None])
+
+    should_continue = lvgl_screen_runner._make_scan_should_continue()
+
+    assert should_continue() is True
+    lv.lvgl_pump.assert_not_called()
+
+
+def test_scan_should_continue_cancels_on_a_button_event(monkeypatch):
+    _fake_lv_for_scan(monkeypatch, [("button_selected", RET_CODE__BACK_BUTTON, None)])
+
+    assert lvgl_screen_runner._make_scan_should_continue(MagicMock())() is False
+
+
+def test_scan_should_continue_drains_the_queue_fully_each_tick(monkeypatch):
+    """A tick keeps scanning only once the queue is empty, so a stale non-button event
+    can't leave an unread cancel sitting behind it."""
+    lv = _fake_lv_for_scan(monkeypatch, [("text_entered", 0, "x"), None])
+
+    assert lvgl_screen_runner._make_scan_should_continue(MagicMock())() is True
+    assert lv.poll_for_result.call_count == 2
