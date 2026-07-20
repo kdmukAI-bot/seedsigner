@@ -104,6 +104,19 @@ def ensure_lvgl_runtime():
         # this init).
         _load_active_locale_fonts(lv)
 
+        # Hand the camera-rotation setting to the native camera engines, which read it at
+        # start(). Sticky, so this one call covers whatever the settings hold — the
+        # built-in default or a value restored from settings.json — and set_value()
+        # re-pushes it whenever the user changes it. Doing it here rather than at Settings
+        # init is what makes the ordering safe: the native module is guaranteed present
+        # inside this init, whereas Settings comes up long before it. Pi-only; the ESP32
+        # camera engines do not read the setting (its settings entry routes to
+        # SettingsEntryDisabledView there). Direct native call, per the note above.
+        if not IS_MICROPYTHON:
+            from seedsigner.models.settings import Settings, SettingsConstants
+            lv.set_camera_rotation(int(Settings.get_instance().get_value(
+                SettingsConstants.SETTING__CAMERA_ROTATION)))
+
         # The camera modules are top-level modules on the ESP but submodules of the
         # native extension on the Pi. Alias them so the bare `import camera_scanner` /
         # `import camera_entropy` in the drive loops is one shape on both platforms.
@@ -425,6 +438,23 @@ def set_locale_fonts(locale, font_dir=LOCALE_PACK_DIR):
     except Exception:
         # A missing/garbled pack must never block a language change.
         return False
+
+
+def set_camera_rotation(degrees):
+    """Push the camera-rotation setting to the native camera engines, which read it at
+    start(). Sticky: it persists until changed, so callers set it on change rather than
+    per scan. Pi-only — the ESP32 engines do not read it. Returns True if it reached the
+    native layer.
+
+    Deliberately does NOT call ensure_lvgl_runtime(): Settings.set_value() calls this, and
+    at boot that runs while settings.json is being read — long before the runtime should
+    come up. Forcing init from there would pull the whole LVGL bring-up (display, input,
+    Controller) into Settings construction, re-entrantly. There is nothing to do in that
+    window anyway: ensure_lvgl_runtime() pushes the settled value itself at init."""
+    if _lv is None:
+        return False
+    _lv.set_camera_rotation(int(degrees))
+    return True
 
 
 def _load_active_locale_fonts(lv):

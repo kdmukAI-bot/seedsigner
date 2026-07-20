@@ -234,6 +234,15 @@ class Settings(Singleton):
         if attr_name == SettingsConstants.SETTING__LOCALE:
             self.load_locale()
 
+        # Special handling for camera rotation: the native camera engines read a sticky
+        # rotation set from here, so a change has to be pushed to them to take effect.
+        # Pi-only (the ESP32 engines do not read it). This also runs at boot, while
+        # settings.json is being read — before the LVGL runtime is up — where it is a
+        # deliberate no-op: ensure_lvgl_runtime() pushes the settled value at init.
+        if attr_name == SettingsConstants.SETTING__CAMERA_ROTATION and not IS_MICROPYTHON:
+            from seedsigner.gui.lvgl_screen_runner import set_camera_rotation
+            set_camera_rotation(int(value))
+
 
     def get_value(self, attr_name: str, default_if_none: bool = None):
         """
