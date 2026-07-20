@@ -129,6 +129,17 @@ def run_scan(decoder, scanner=None, *, poll_interval_ms=20,
     progressed = [False]   # saw a PART_COMPLETE before COMPLETE (multi-part scan)
     max_pct = [0]          # monotonic clamp for the displayed percent
 
+    # Segmented progress (BBQR / Specter indexed cycles): the SCREEN owns the decoded set —
+    # announce the cycle size once, then stream one segment_event() per frame and the overlay
+    # derives the percent from its own lit count, lighting cells out-of-order. UR/fountain +
+    # single-frame QRs stay on the continuous report() path. begin_segments/segment_event are
+    # the newer scanner surface; feature-detect so older firmware + the injected test fakes
+    # fall back to the continuous bar. Gated on the decoder (is_segmented) so this module
+    # needs no decode_qr import (see the four-constant note above).
+    seg_supported = hasattr(cs, "begin_segments") and hasattr(cs, "segment_event")
+    segmented = [False]    # currently driving the segmented bar (an indexed cycle)
+    announced = [False]    # begin_segments() decision already made (segmented or not)
+
     def _emit(cb, *a):
         if cb is not None:
             cb(*a)
@@ -149,6 +160,23 @@ def run_scan(decoder, scanner=None, *, poll_interval_ms=20,
         else:
             max_pct[0] = p
         return p
+
+    def _segmented():
+        # Decide segmented-vs-continuous once — after the first decode has resolved qr_type
+        # and revealed the cycle total — then announce the cycle to the overlay. Returns True
+        # while in segmented mode; idempotent (safe to call every frame).
+        if announced[0]:
+            return segmented[0]
+        if not (seg_supported and getattr(decoder, "is_segmented", False)):
+            announced[0] = True            # resolved as continuous; stop checking
+            return False
+        total = getattr(decoder, "total_segments", 0)
+        if not total or total <= 0:
+            return False                   # cycle size not revealed yet; re-check next frame
+        cs.begin_segments(total)
+        segmented[0] = True
+        announced[0] = True
+        return True
 
     while True:
         if not _cont():
@@ -172,23 +200,41 @@ def run_scan(decoder, scanner=None, *, poll_interval_ms=20,
             pct = _percent()
 
             if status == _COMPLETE:
-                # Terminal: drive the bar to full + green.
-                cs.report(cs.FRAME_NEW, 100)
+                # Terminal. Segmented: light the final piece so every cell is green (derived
+                # 100%). Continuous: drive the fill to full + green.
+                if _segmented():
+                    cs.segment_event(cs.FRAME_NEW, decoder.last_part_number)
+                else:
+                    cs.report(cs.FRAME_NEW, 100)
                 _emit(on_progress, 100, status)
-                # Multi-part: hold briefly so the overlay's fill animation can
-                # glide to 100 and rest (a confirmation beat) before teardown.
-                # Single-part decoded in one frame with no prior progress — snap
-                # and hand off immediately, no needless delay.
+                # Flush the completed bar before the hold. run_scan returns straight after
+                # this with no further should_continue tick, so on the Pi — where LVGL only
+                # advances when we pump — the final update (the just-lit final segment cell,
+                # or the 100% fill) would be set but never rendered, leaving the last cell
+                # blank / the bar short of full. _cont() pumps on the Pi; on MicroPython it's
+                # a harmless input drain (the firmware display task renders on its own). Its
+                # cancel return is irrelevant here — the scan is already complete.
+                _cont()
+                # Multi-part: hold briefly so the completed bar rests as a confirmation beat
+                # before teardown. Single-part decoded in one frame with no prior progress —
+                # snap and hand off immediately, no needless delay.
                 if progressed[0] and completion_hold_ms:
                     _sleep_ms(completion_hold_ms)
                 cs.report_complete()
                 return ScanResult(decoder, True, False, "complete", polls, last_dropped)
             elif status == _PART_COMPLETE:
                 progressed[0] = True
-                cs.report(cs.FRAME_NEW, pct)        # green dot, bar advances
+                if _segmented():
+                    cs.segment_event(cs.FRAME_NEW, decoder.last_part_number)  # light the new cell
+                else:
+                    cs.report(cs.FRAME_NEW, pct)    # green dot, bar advances
                 _emit(on_progress, pct, status)
             elif status == _PART_EXISTING:
-                cs.report(cs.FRAME_REPEAT, pct)     # gray dot, no new info
+                if segmented[0]:
+                    # Re-read piece: mark it the current cell (white) — no new progress.
+                    cs.segment_event(cs.FRAME_REPEAT, decoder.last_part_number)
+                else:
+                    cs.report(cs.FRAME_REPEAT, pct)  # gray dot, no new info
             else:  # _FALSE / _INVALID: decoded bytes, not a recognized format
                 _emit(on_invalid, payload, status)
 
@@ -199,7 +245,13 @@ def run_scan(decoder, scanner=None, *, poll_interval_ms=20,
         # Dot for the non-NEW frames the drain above didn't cover. A held,
         # already-decoded QR streams REPEATs (no payload); an empty scene streams
         # NONE. MISS keeps the dot as-is (its signal is the counter, §6).
-        if st.latest == cs.FRAME_REPEAT:
+        if segmented[0]:
+            # Dot-only update: no payload this round, so no piece index. segment_event with
+            # piece_index = -1 touches only the frame dot, never the fill — so a held/idle
+            # frame can't paint a continuous bar over the out-of-order cells.
+            if st.latest == cs.FRAME_REPEAT or st.latest == cs.FRAME_NONE:
+                cs.segment_event(st.latest, -1)
+        elif st.latest == cs.FRAME_REPEAT:
             cs.report(cs.FRAME_REPEAT, pct)
         elif st.latest == cs.FRAME_NONE:
             cs.report(cs.FRAME_NONE, pct)

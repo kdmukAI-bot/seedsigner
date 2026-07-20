@@ -10,6 +10,7 @@ from seedsigner.hardware.scan_consumer import (
     run_scan,
     ScanResult,
     _PART_COMPLETE,
+    _PART_EXISTING,
     _COMPLETE,
     _FALSE,
 )
@@ -214,3 +215,87 @@ def test_sustained_miss_warning_fires_once():
     assert result.cancelled is True
     # Debounced (persist=2) and latched: one warning despite several miss rounds.
     assert warns == [15]
+
+
+# ── Segmented (indexed-cycle) progress: BBQR / Specter ──────────────────────
+# The scanner grows two methods (begin_segments/segment_event) and the decoder
+# exposes is_segmented + total_segments + a 0-based last_part_number. run_scan
+# announces the cycle once, then streams one segment_event() per frame and never
+# touches the continuous report() bar (which would fight the out-of-order cells).
+
+class SegmentedFakeScanner(FakeScanner):
+    """FakeScanner + the indexed-cycle surface (begin_segments/segment_event)."""
+
+    def __init__(self, *a, **kw):
+        super().__init__(*a, **kw)
+        self.begun = []           # total_segments values passed to begin_segments()
+        self.segment_events = []  # (status, piece_index) tuples
+
+    def begin_segments(self, total_segments):
+        self.begun.append(total_segments)
+
+    def segment_event(self, status, piece_index):
+        self.segment_events.append((status, piece_index))
+
+
+class SegmentedFakeDecoder(FakeDecoder):
+    """FakeDecoder for an indexed cycle: is_segmented + total_segments + a scripted
+    0-based last_part_number per add_data() call (set for new AND repeat frames)."""
+
+    def __init__(self, statuses, parts, total_segments, percents=None):
+        super().__init__(statuses, percents=percents)
+        self._parts = list(parts)
+        self.total_segments = total_segments
+        self.last_part_number = -1
+        self.is_segmented = True
+
+    def add_data(self, payload):
+        status = super().add_data(payload)  # advances self._idx
+        self.last_part_number = self._parts[self._idx - 1]
+        return status
+
+
+def test_segmented_indexed_cycle_out_of_order():
+    # A 3-piece cycle scanned out of order: piece 2 (new), piece 0 (new), piece 2
+    # again (re-read), piece 1 (new -> COMPLETE). One drain round.
+    scanner = SegmentedFakeScanner(rounds=[[b"p2", b"p0", b"p2", b"p1"]])
+    decoder = SegmentedFakeDecoder(
+        statuses=[_PART_COMPLETE, _PART_COMPLETE, _PART_EXISTING, _COMPLETE],
+        parts=[2, 0, 2, 1],
+        total_segments=3,
+        percents=[33, 66, 66, 100],
+    )
+
+    result = run_scan(decoder, scanner=scanner, poll_interval_ms=0, completion_hold_ms=0)
+
+    assert result.complete is True
+    assert scanner.completed is True                 # report_complete() still terminal
+    assert scanner.begun == [3]                       # announced exactly once
+    assert scanner.segment_events == [
+        (FakeScanner.FRAME_NEW, 2),                   # new piece 2
+        (FakeScanner.FRAME_NEW, 0),                   # new piece 0
+        (FakeScanner.FRAME_REPEAT, 2),                # re-read piece 2 (current cell)
+        (FakeScanner.FRAME_NEW, 1),                   # final piece -> all lit
+    ]
+    assert scanner.reports == []                      # never the continuous bar
+
+
+def test_segmented_decoder_falls_back_when_scanner_lacks_support():
+    # An indexed-cycle decoder, but the scanner (old firmware / plain fake) has no
+    # begin_segments/segment_event -> stay on the continuous report() path, no crash.
+    scanner = FakeScanner(rounds=[[b"p0", b"p1"]])    # report()/report_complete() only
+    decoder = SegmentedFakeDecoder(
+        statuses=[_PART_COMPLETE, _COMPLETE],
+        parts=[0, 1],
+        total_segments=2,
+        percents=[50, 100],
+    )
+
+    result = run_scan(decoder, scanner=scanner, poll_interval_ms=0, completion_hold_ms=0)
+
+    assert result.complete is True
+    assert scanner.completed is True
+    assert scanner.reports == [
+        (FakeScanner.FRAME_NEW, 50),
+        (FakeScanner.FRAME_NEW, 100),
+    ]
