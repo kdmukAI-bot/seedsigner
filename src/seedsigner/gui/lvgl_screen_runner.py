@@ -36,6 +36,7 @@ import logging
 
 from seedsigner.compat import IS_MICROPYTHON
 from seedsigner.compat.threading import Lock
+from seedsigner.compat.time import sleep_ms as _sleep_ms
 from seedsigner.models.threads import BaseThread
 from seedsigner.views.view import RET_CODE__BACK_BUTTON, RET_CODE__POWER_BUTTON
 
@@ -609,14 +610,13 @@ def run_lvgl_screen(renderer, screen, *, attrs=None):
         # input, the pump, and its own idle screensaver, so none of the CPython
         # blended-display machinery below (flush callback, renderer.lock, Python-side
         # pump) applies here.
-        import time
         _lv.clear_result_queue()
         screen_fn(*args)
         while True:
             event = _lv.poll_for_result()
             if event is not None:
                 return _translate_event(event)
-            time.sleep_ms(20)
+            _sleep_ms(20)
 
     # CPython / Pi Zero blended display. Build the screen once, then pump LVGL and
     # poll in a loop, holding renderer.lock around each pump so PIL and LVGL never
@@ -1194,7 +1194,6 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
     input gate, that treats a still-held key as *new* input, so a click held slightly too long
     skipped or instantly dismissed the QR (see docs/_integration/pi-pil-input-cutover-todo.md)."""
     ensure_lvgl_runtime()
-    import time
     from seedsigner.compat.l10n import gettext as _
     from seedsigner.models.settings import Settings, SettingsConstants
     settings = Settings.get_instance()
@@ -1302,11 +1301,8 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
                     _lv.qr_display_set_frame(_qr_frame_bytes(encoder.next_part()))
                 was_tip_active = tip_active
 
-            # ~6 fps, matching the PIL QRDisplayThread cadence (sleep_ms is MicroPython-only).
-            if IS_MICROPYTHON:
-                time.sleep_ms(166)
-            else:
-                time.sleep(0.166)
+            # ~6 fps, matching the PIL QRDisplayThread cadence.
+            _sleep_ms(166)
     finally:
         if not IS_MICROPYTHON:
             _lv.set_flush_callback(None)
@@ -1342,7 +1338,6 @@ def run_camera_entropy(*, seed_hash=None):
     Accept -> return the frame. Test back BEFORE the generic button branch, or it gets swallowed.
     """
     ensure_lvgl_runtime()
-    import time
     import camera_entropy
     from seedsigner.compat.l10n import gettext as _
 
@@ -1385,14 +1380,14 @@ def run_camera_entropy(*, seed_hash=None):
                             camera_entropy.capture()
                             captured = True
                     else:
-                        time.sleep_ms(20)
+                        _sleep_ms(20)
 
                 # --- Latch: wait for the frozen final frame to be ready + displayed. ---
                 result = None
                 while result is None:
                     result = camera_entropy.get_result()
                     if result is None:
-                        time.sleep_ms(5)
+                        _sleep_ms(5)
                 preview_frame_entropy, final_image_bytes, _n = result
 
                 # --- Review phase: accept the frozen frame, or reshoot (resume + loop). ---
@@ -1409,7 +1404,7 @@ def run_camera_entropy(*, seed_hash=None):
                         if event[0] == "button_selected":
                             return (preview_frame_entropy, final_image_bytes)  # accept
                     else:
-                        time.sleep_ms(20)
+                        _sleep_ms(20)
         finally:
             camera_entropy.stop()
     finally:
@@ -1432,7 +1427,6 @@ def run_seed_address_verification_screen(*, address, type_network, network, titl
     poll loop); the native screen forces show_back_button off, so the only buttons are Skip 10
     (index 0) and Cancel (index 1)."""
     ensure_lvgl_runtime()
-    import time
     from seedsigner.compat.l10n import gettext as _
 
     def _progress_text():
@@ -1469,7 +1463,7 @@ def run_seed_address_verification_screen(*, address, type_network, network, titl
             if verified_index.cur_count is not None:
                 return True
             _lv.seed_address_verification_set_progress(_progress_text())
-            time.sleep_ms(100)
+            _sleep_ms(100)
     finally:
         if not allow_screensaver:
             _lv.set_screensaver_timeout(_screensaver_timeout_ms)

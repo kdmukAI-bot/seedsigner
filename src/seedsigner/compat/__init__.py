@@ -25,6 +25,11 @@ Currently:
     absent from ``binascii`` too); the real ``base64`` on CPython.
   * ``hmac`` — a one-shot ``digest()`` over the embit MicroPython stack's
     ``hmac`` (no ``hmac`` in core); the real ``hmac`` on CPython.
+  * ``time`` — the INVERSE direction: ``sleep_ms``/``ticks_ms``/``ticks_diff``
+    are MicroPython extensions that **CPython** lacks, rebuilt there over
+    ``time.sleep``/``time.monotonic``. Used by the dual-platform drive loops
+    (``gui.lvgl_screen_runner``, ``hardware.scan_consumer``). Note the checker
+    does not cover this direction — see the module docstring.
 
 (``logging`` is NOT here: it is a required frozen ``micropython-lib`` dependency
 the app imports directly — see ``docs/micropython_compatibility.md`` §3.)

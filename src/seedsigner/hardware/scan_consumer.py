@@ -53,21 +53,14 @@ try:
 except ImportError:  # not on device / not built in
     _default_scanner = None
 
-# ── Timing shim: MicroPython has time.sleep_ms/ticks_ms/ticks_diff; CPython does
-# not. Fall back to the monotonic clock so the loop runs unchanged under tests.
-try:
-    from time import sleep_ms as _sleep_ms, ticks_ms as _ticks_ms, ticks_diff as _ticks_diff
-except ImportError:  # CPython
-    import time as _time
-
-    def _sleep_ms(ms):
-        _time.sleep(ms / 1000.0)
-
-    def _ticks_ms():
-        return int(_time.monotonic() * 1000)
-
-    def _ticks_diff(a, b):
-        return a - b
+# ── Timing: MicroPython has time.sleep_ms/ticks_ms/ticks_diff; CPython does not.
+# The shim this module used to define inline now lives in compat (the GUI runner
+# needs it too), so the loop below runs unchanged on both interpreters.
+from seedsigner.compat.time import (
+    sleep_ms as _sleep_ms,
+    ticks_ms as _ticks_ms,
+    ticks_diff as _ticks_diff,
+)
 
 
 class ScanResult:
