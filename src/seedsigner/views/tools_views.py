@@ -1,3 +1,4 @@
+import gc
 import hashlib
 import logging
 import time
@@ -128,6 +129,8 @@ class ToolsImageEntropyMnemonicLengthView(View):
     TWENTYFOUR_WORDS = ButtonOption("24 words", return_data=24)
 
     def run(self):
+        import camera_entropy
+
         from seedsigner.views.seed_views import SeedWordsWarningView
 
         button_data = [self.TWELVE_WORDS, self.TWENTYFOUR_WORDS]
@@ -177,22 +180,24 @@ class ToolsImageEntropyMnemonicLengthView(View):
         if not final_image_bytes or final_image_bytes == bytes([final_image_bytes[0]]) * len(final_image_bytes):
             raise ValueError("Camera entropy final image is uninitialized; capture failed")
 
-        # TODO: also confirm the exact final-image length (WIDTH*HEIGHT*2) once the per-platform
-        # capture dimensions are pinned — Pi = 240x240 (115200 bytes); ESP32-P4 dims TBD (see the plan).
+        # Reject a final image that is too small to be a real capture. Each device decides its own
+        # final image dimensions, so this is a guaranteed minimum rather than an exact size: no
+        # device captures a final image smaller than 240x240, at two bytes per pixel.
+        MINIMUM_FINAL_IMAGE_BYTES = 240 * 240 * 2
+        if len(final_image_bytes) < MINIMUM_FINAL_IMAGE_BYTES:
+            raise ValueError("Camera entropy final image is too small (%d bytes, expected at least %d); capture failed" % (len(final_image_bytes), MINIMUM_FINAL_IMAGE_BYTES))
 
         # Combine everything into the seed entropy as one running SHA-256 chain, weakest first.
 
-        #   1. Seed the chain with small platform-specific extras: a device id, then the current
-        #      time. Best-effort (skip any source we cannot read); the camera images below are the
-        #      real entropy, so these extras only add insurance.
+        #   1. Seed the chain with small platform-specific extras:
         if IS_MICROPYTHON:
-            # ESP32: the chip's unique id, then milliseconds since power-on.
-            try:
-                import machine
-                seed_entropy = hashlib.sha256(bytes(machine.unique_id())).digest()
-                seed_entropy = hashlib.sha256(seed_entropy + str(time.ticks_ms()).encode()).digest()
-            except Exception:
-                seed_entropy = hashlib.sha256(b"").digest()
+            import machine
+
+            # Build in some hardware-level uniqueness via the chip's unique id.
+            seed_entropy = hashlib.sha256(bytes(machine.unique_id())).digest()
+
+            # Build in modest additional entropy via the microseconds since power-on.
+            seed_entropy = hashlib.sha256(seed_entropy + str(time.ticks_us()).encode()).digest()
         else:
             # Raspberry Pi: read the CPU's unique serial number from /proc/cpuinfo.
             serial_number = b""
@@ -206,14 +211,20 @@ class ToolsImageEntropyMnemonicLengthView(View):
                 pass
             # Build in some hardware-level uniqueness via the CPU's unique serial number.
             seed_entropy = hashlib.sha256(serial_number).digest()
-            # Build in modest additional entropy via the milliseconds since power-on.
-            seed_entropy = hashlib.sha256(seed_entropy + str(time.time()).encode()).digest()
+
+            # Build in modest additional entropy via the microseconds since power-on.
+            seed_entropy = hashlib.sha256(seed_entropy + str(time.monotonic_ns() // 1000).encode()).digest()
 
         #   2. Chain in the camera's running preview-frame entropy — the whole preview video.
         seed_entropy = hashlib.sha256(seed_entropy + preview_frame_entropy).digest()
 
-        #   3. Finally build in the headline entropy: the full-resolution final image.
-        seed_entropy = hashlib.sha256(seed_entropy + final_image_bytes).digest()
+        #   3. Finally build in the headline entropy: the full-resolution final image. This step
+        #      adds the image with an update() call instead of the "+" used above, for memory
+        #      efficiency ("+" would create a new copy that can be multiple megabytes of data).
+        #      The resulting value is identical either way.
+        seed_entropy_hasher = hashlib.sha256(seed_entropy)
+        seed_entropy_hasher.update(final_image_bytes)
+        seed_entropy = seed_entropy_hasher.digest()
 
         # A 12-word mnemonic uses the first 128 bits (16 bytes); 24 words uses all 256 bits.
         if mnemonic_length == 12:
@@ -221,11 +232,20 @@ class ToolsImageEntropyMnemonicLengthView(View):
 
         mnemonic = mnemonic_generation.generate_mnemonic_from_bytes(seed_entropy, wordlist_language_code)
 
-        # Entropy should never stick around in memory
+        # Entropy should never stick around in memory. Overwrite the camera data, clearing it to
+        # zero, then drop the references.
+        camera_entropy.secure_zero(final_image_bytes)
+        camera_entropy.secure_zero(preview_frame_entropy)
+
         self.controller.image_entropy_native_result = None
         preview_frame_entropy = None
         final_image_bytes = None
+        seed_entropy_hasher = None
         seed_entropy = None
+
+        # MicroPython needs this to clean up the large amount of memory the final image used. It
+        # does nothing on the Raspberry Pi, which has already released that memory above.
+        gc.collect()
 
         seed = Seed(mnemonic, wordlist_language_code=wordlist_language_code)
         self.controller.storage.set_pending_seed(seed)

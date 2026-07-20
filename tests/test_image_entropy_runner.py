@@ -44,11 +44,17 @@ class _FakeCameraEntropy:
 
     def get_result(self):
         self.calls.append("get_result")
-        return (b"C" * 32, b"F" * 8, 5) if self._captured else None
+        # Mutable bytearrays, as the real bindings return, so the runner can scrub them in place.
+        return (bytearray(b"C" * 32), bytearray(b"F" * 8), 5) if self._captured else None
 
     def resume(self):
         self.calls.append("resume")
         self._captured = False
+
+    def secure_zero(self, buf):
+        self.calls.append("secure_zero")
+        for index in range(len(buf)):
+            buf[index] = 0
 
     def stop(self):
         self.calls.append("stop")
@@ -138,6 +144,8 @@ def test_image_entropy_reshoot_then_accept(monkeypatch):
     assert result == (b"C" * 32, b"F" * 8)
     assert "resume" in fake_cam.calls        # reshot at least once
     assert fake_cam.calls.count("capture") == 2
+    # The discarded shot's buffers must be scrubbed before the reshoot, not just dropped.
+    assert fake_cam.calls.index("secure_zero") < fake_cam.calls.index("resume")
 
 
 def test_image_entropy_camera_start_failure_returns_none(monkeypatch):
