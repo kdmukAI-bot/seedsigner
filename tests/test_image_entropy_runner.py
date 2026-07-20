@@ -23,9 +23,15 @@ class _FakeCameraEntropy:
         self._start_raises = start_raises
         self.labels = None
 
-    def set_labels(self, capturing_text, accept_label):
+    def set_labels(self, capturing_text, accept_label,
+                   preview_instructions=None, confirm_instructions=None):
+        # Four POSITIONAL args, mirroring both real bindings: 1-2 are the touch
+        # affordances, 3-4 the hardware-input bottom instruction lines. The ESP's
+        # MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN takes no keywords, so the runner must
+        # pass these positionally — accept them the same way here.
         self.calls.append("set_labels")
-        self.labels = (capturing_text, accept_label)
+        self.labels = (capturing_text, accept_label,
+                       preview_instructions, confirm_instructions)
 
     def start(self, seed_hash=None):
         self.calls.append("start")
@@ -74,7 +80,16 @@ def test_image_entropy_capture_accept_returns_chain_and_frame(monkeypatch):
     # Accept button + "Capturing..." text render blank.
     assert fake_cam.calls[0] == "set_labels"
     assert fake_cam.calls[1] == "start"
-    assert fake_cam.labels == ("Capturing image...", "Accept")
+    # All FOUR strings, not just the two touch ones. Args 3-4 are the hardware-input
+    # bottom instruction lines; omitting them left the Pi's joystick overlay with no
+    # on-screen guidance at all (the overlay skips the text when handed an empty string),
+    # while touch platforms looked fine — so only a device with physical buttons shows it.
+    assert fake_cam.labels == (
+        "Capturing image...",
+        "Accept",
+        "< back  |  click a button",
+        "< reshoot  |  accept >",
+    )
     # Documented host loop order (set_labels -> start -> capture -> get_result -> stop).
     assert "capture" in fake_cam.calls
     assert fake_cam.calls[-1] == "stop"        # always stopped in finally

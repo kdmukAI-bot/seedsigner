@@ -1378,10 +1378,26 @@ def run_camera_entropy(*, seed_hash=None):
             with renderer.lock:
                 _lv.set_flush_mode("python")
                 _lv.set_flush_callback(_make_flush_callback(renderer.disp))
-        # The native overlay holds no strings; hand it the two touch labels already translated
-        # (mirrors the PIL ToolsImageEntropyLivePreviewScreen). Nothing is hardcoded in firmware,
-        # so these must be set before the camera starts or the button/text render blank.
-        camera_entropy.set_labels(_("Capturing image..."), _("Accept"))
+        # The native overlay holds no strings; hand it every label already translated. Nothing
+        # is hardcoded in firmware, so these must be set before the camera starts or the
+        # button/text render blank.
+        #
+        # All four are passed unconditionally, which is what both bindings are built for: args
+        # 1-2 are the TOUCH affordances (the CAPTURING transient + the CONFIRM Accept button),
+        # args 3-4 the HARDWARE-input bottom instruction lines the overlay renders only under
+        # INPUT_MODE_HARDWARE — inert on a touch panel, so one host loop serves both platforms.
+        # Composed from the same msgids as the PIL screens they replace
+        # (ToolsImageEntropyLivePreviewScreen / ToolsImageEntropyFinalImageScreen), so the
+        # wording and its translations carry over rather than forking a second set of strings.
+        #
+        # POSITIONAL, not keyword: the ESP binding is MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN,
+        # which takes positional args only — keywords would work on the Pi and break the ESP.
+        camera_entropy.set_labels(
+            _("Capturing image..."),
+            _("Accept"),
+            "< " + _("back") + "  |  " + _("click a button"),
+            "< " + _("reshoot") + "  |  " + _("accept") + " >",
+        )
         try:
             camera_entropy.start(seed_hash)
         except OSError as e:
