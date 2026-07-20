@@ -104,6 +104,20 @@ def ensure_lvgl_runtime():
         # this init).
         _load_active_locale_fonts(lv)
 
+        # The camera modules are top-level modules on the ESP but submodules of the
+        # native extension on the Pi. Alias them so the bare `import camera_scanner` /
+        # `import camera_entropy` in the drive loops is one shape on both platforms.
+        # setdefault, not assignment: a real top-level module (the ESP case) or a test
+        # double already registered must win — this papers over a platform difference,
+        # it never shadows a genuine module. The getattr guard lets a no-camera
+        # diagnostic build fall through to the drive loops' existing ImportError path
+        # instead of raising AttributeError in here.
+        import sys
+        for _camera_module_name in ("camera_scanner", "camera_entropy"):
+            _camera_module = getattr(lv, _camera_module_name, None)
+            if _camera_module is not None:
+                sys.modules.setdefault(_camera_module_name, _camera_module)
+
         # Publish _lv last: until it is set, other threads keep waiting on the
         # lock rather than seeing a partially-initialized runtime.
         _lv = lv
