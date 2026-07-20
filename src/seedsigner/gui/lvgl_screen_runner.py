@@ -32,6 +32,7 @@ for screens that must stay up (e.g. camera scanning), the shared parser defaults
 true, and the native scaffold stamps the screen object so the dispatcher skips it.
 """
 import array
+import gc
 import logging
 
 from seedsigner.compat import IS_MICROPYTHON
@@ -1448,6 +1449,16 @@ def run_camera_entropy(*, seed_hash=None):
                         # by the RET_CODE__BACK_BUTTON index sentinel. Test back FIRST so it
                         # can't be misread as an accept.
                         if event[1] == RET_CODE__BACK_BUTTON:
+                            # Discarding this shot: overwrite the camera data, clearing it to
+                            # zero, before dropping it. Every reshoot allocates a fresh pair on
+                            # the next get_result(), so without this each one leaves a whole
+                            # readable image behind.
+                            camera_entropy.secure_zero(final_image_bytes)
+                            camera_entropy.secure_zero(preview_frame_entropy)
+                            preview_frame_entropy = None
+                            final_image_bytes = None
+                            gc.collect()
+
                             camera_entropy.resume()        # reshoot -> back to preview
                             break
                         if event[0] == "button_selected":

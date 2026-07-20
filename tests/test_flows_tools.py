@@ -9,17 +9,31 @@ from seedsigner.views.view import ErrorView, MainMenuView
 from seedsigner.views import scan_views, seed_views, tools_views
 
 import hashlib
+import sys
 from contextlib import contextmanager
 from unittest.mock import mock_open, patch
 
 from seedsigner.helpers import mnemonic_generation
 
 
-# Pin the inline image-entropy host sources (Pi CPU serial + time.time) so the otherwise
+class _StubCameraEntropy:
+    """Stand-in for the platform-specific camera_entropy module so the View can import it on host
+    CPython. secure_zero really does clear the buffer, which stops a test from silently reusing a
+    buffer that production would have scrubbed -- but nothing here is asserted on. The real
+    implementation's guarantees (in place, and not discarded by the optimizer) are C-level and
+    only observable on-device, so asserting against this stub would only re-test the stub."""
+
+    @staticmethod
+    def secure_zero(buf):
+        for index in range(len(buf)):
+            buf[index] = 0
+
+
+# Pin the inline image-entropy host sources (Pi CPU serial + monotonic clock) so the otherwise
 # time-varying seed derivation in ToolsImageEntropyMnemonicLengthView is deterministic for
-# exact-vector assertions.
+# exact-vector assertions, and supply the camera module the View imports.
 @contextmanager
-def _pin_host(serial=b"DEADBEEFCAFE0123", t=1234.5):
+def _pin_host(serial=b"DEADBEEFCAFE0123", t=1234567890):
     cpuinfo = "processor\t: 0\nSerial\t\t: %s\n" % serial.decode()
     real_open = open
 
@@ -28,15 +42,32 @@ def _pin_host(serial=b"DEADBEEFCAFE0123", t=1234.5):
             return mock_open(read_data=cpuinfo)()
         return real_open(path, *args, **kwargs)
 
-    with patch("builtins.open", side_effect=fake_open), patch("time.time", return_value=t):
-        yield (serial, t)
+    # Insert the one module key directly rather than via patch.dict, which snapshots and restores
+    # the whole of sys.modules -- that races the Controller's BackgroundImportThread and can strip
+    # out modules it imported while this was open.
+    sys.modules["camera_entropy"] = _StubCameraEntropy
+    try:
+        with patch("builtins.open", side_effect=fake_open), \
+                patch("time.monotonic_ns", return_value=t):
+            yield (serial, t)
+    finally:
+        sys.modules.pop("camera_entropy", None)
+
+
+def _fresh_camera_result():
+    # Fresh buffers per run: the View scrubs them in place, so one pair cannot serve both runs.
+    # Mutable bytearrays (the bindings hand back bytearrays precisely so the scrub can land), and
+    # a final image at least the minimum size a real capture produces.
+    preview_frame_entropy = bytearray(range(32))
+    final_image_bytes = bytearray(b"\xab\xcd\xef\x12" * (240 * 240 * 2 // 4))
+    return preview_frame_entropy, final_image_bytes
 
 
 def _expected_entropy(preview_frame_entropy, final_image_bytes, serial, t):
     # Mirror the inline derivation's running chain: serial -> +time -> +preview-frame entropy ->
-    # +final image.
+    # +final image. The View hashes microseconds, taken from a nanosecond clock.
     entropy = hashlib.sha256(serial).digest()
-    entropy = hashlib.sha256(entropy + str(t).encode()).digest()
+    entropy = hashlib.sha256(entropy + str(t // 1000).encode()).digest()
     entropy = hashlib.sha256(entropy + preview_frame_entropy).digest()
     return hashlib.sha256(entropy + final_image_bytes).digest()
 
@@ -49,25 +80,28 @@ class TestToolsFlows(FlowTest):
         16 bytes for 12 words). Drive the view with a pinned native camera result + pinned host
         serial/time and confirm the generated pending seed matches, for both lengths."""
         controller = Controller.get_instance()
-        preview_frame_entropy = bytes(range(32))
-        final_image_bytes = b"\xab\xcd\xef\x12" * 16   # stand-in RGB565 latched frame
 
         # 12-word: run_button_list_screen returns index 0 (TWELVE_WORDS)
+        preview_frame_entropy, final_image_bytes = _fresh_camera_result()
+        # Copy the inputs before the run: the View scrubs the originals to zero.
+        original = (bytes(preview_frame_entropy), bytes(final_image_bytes))
         controller.image_entropy_native_result = (preview_frame_entropy, final_image_bytes)
         view = tools_views.ToolsImageEntropyMnemonicLengthView()
         with _pin_host() as (serial, t), patch.object(view, "run_button_list_screen", return_value=0):
             view.run()
         expected_12 = mnemonic_generation.generate_mnemonic_from_bytes(
-            _expected_entropy(preview_frame_entropy, final_image_bytes, serial, t)[:16])
+            _expected_entropy(original[0], original[1], serial, t)[:16])
         assert controller.storage.get_pending_seed().mnemonic_list == expected_12
 
         # 24-word: run_button_list_screen returns index 1 (TWENTYFOUR_WORDS)
+        preview_frame_entropy, final_image_bytes = _fresh_camera_result()
+        original = (bytes(preview_frame_entropy), bytes(final_image_bytes))
         controller.image_entropy_native_result = (preview_frame_entropy, final_image_bytes)
         view = tools_views.ToolsImageEntropyMnemonicLengthView()
         with _pin_host() as (serial, t), patch.object(view, "run_button_list_screen", return_value=1):
             view.run()
         expected_24 = mnemonic_generation.generate_mnemonic_from_bytes(
-            _expected_entropy(preview_frame_entropy, final_image_bytes, serial, t))
+            _expected_entropy(original[0], original[1], serial, t))
         assert controller.storage.get_pending_seed().mnemonic_list == expected_24
 
     def test_dice_entropy_entry_uses_native_keyboard_cfg(self):
