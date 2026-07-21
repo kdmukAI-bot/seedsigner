@@ -1715,8 +1715,12 @@ class SeedTranscribeSeedQRConfirmScanView(View):
     def run(self):
         from seedsigner.views.scan_views import ScanCameraErrorView
         from seedsigner.gui.lvgl_screen_runner import run_camera_scan
+        from seedsigner.helpers.l10n import scan_instructions_line, mark_for_translation as _mft
 
-        result = run_camera_scan(self.decoder)
+        result = run_camera_scan(
+            self.decoder,
+            instructions_text=scan_instructions_line(_mft("Scan SeedQR")),
+        )
         if result is None:
             # Camera failed to start; recover to a notice + the menu rather than crashing.
             return Destination(ScanCameraErrorView)

@@ -3,7 +3,7 @@ import re
 
 from seedsigner.compat.l10n import gettext as _
 from seedsigner.gui.constants import StatusType
-from seedsigner.helpers.l10n import mark_for_translation as _mft
+from seedsigner.helpers.l10n import mark_for_translation as _mft, scan_instructions_line
 from seedsigner.models.settings import SettingsConstants
 from seedsigner.views.view import BackStackView, ButtonOption, ErrorView, MainMenuView, NotYetImplementedView, View, Destination
 
@@ -42,7 +42,10 @@ class ScanView(View):
     def run(self):
         from seedsigner.gui.lvgl_screen_runner import run_camera_scan
 
-        result = run_camera_scan(self.decoder)
+        result = run_camera_scan(
+            self.decoder,
+            instructions_text=scan_instructions_line(self.instructions_text),
+        )
         if result is None:
             # Camera failed to start; recover to a notice + the menu rather than crashing.
             return Destination(ScanCameraErrorView)
