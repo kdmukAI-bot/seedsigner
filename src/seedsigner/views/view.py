@@ -376,8 +376,7 @@ class View:
         platforms — the runner owns the per-platform pump mechanics. The PIL
         ``QRDisplayScreen`` stays in-tree (upstream parity) but is unreachable on-device;
         keeping the Pi native here keeps GPIO input on the native held-key gate instead of
-        the PIL screen's independent ``HardwareButtons`` reader (see
-        docs/_integration/pi-pil-input-cutover-todo.md). Callers ignore the return value and
+        the PIL screen's independent ``HardwareButtons`` reader. Callers ignore the return value and
         route on their own fixed Destination."""
         from seedsigner.gui.lvgl_screen_runner import run_qr_display_screen as _run_qr_display_screen
         return _run_qr_display_screen(qr_encoder)

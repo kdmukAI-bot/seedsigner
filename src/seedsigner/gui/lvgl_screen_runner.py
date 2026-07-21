@@ -78,7 +78,7 @@ def ensure_lvgl_runtime():
         except ImportError:
             # Interim: the ESP32 firmware still registers the pre-rename native
             # module name. Drop this fallback once the builder renames it to
-            # seedsigner_lvgl_screens (builder docs/rename-native-module.md).
+            # seedsigner_lvgl_screens.
             import seedsigner_lvgl as lv
         if IS_MICROPYTHON:
             # On-device the native module sets up display + input itself.
@@ -522,9 +522,7 @@ def show_toast(label_text, icon_name=None, outline_color=None, font_color=None, 
     cross the boundary as ``0xRRGGBB`` ints (a direct ``uint32_t`` for the native
     ``toast_overlay_spec_t``); ``None`` fields are omitted so the native default applies.
     No-op when the native runtime is absent (dev/CI/host tests); a notification must never
-    crash or block its caller. The binding is platform-symmetric — see the toast binding
-    contract (``docs/toast-binding-contract.md`` in both seedsigner-raspi-lvgl and
-    seedsigner-micropython-builder).
+    crash or block its caller. The binding is platform-symmetric.
     """
     try:
         ensure_lvgl_runtime()
@@ -555,8 +553,7 @@ def dismiss_toast():
     ``overlay_manager_dismiss_toast()``). Routine toasts self-dismiss on their
     ``duration_ms`` timer, so the app does NOT reach for this from its producer threads;
     it is the documented entry point for a future LVGL-thread caller (e.g. a screen that
-    clears its own toast). See the toast binding contract (``docs/toast-binding-contract.md``
-    in seedsigner-raspi-lvgl / -micropython-builder).
+    clears its own toast).
     """
     try:
         ensure_lvgl_runtime()
@@ -1199,7 +1196,7 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
     callback. The Pi routes here rather than to the PIL ``QRDisplayScreen`` because the PIL
     screen reads GPIO through ``HardwareButtons`` — a second reader, independent of the native
     input gate, that treats a still-held key as *new* input, so a click held slightly too long
-    skipped or instantly dismissed the QR (see docs/_integration/pi-pil-input-cutover-todo.md)."""
+    skipped or instantly dismissed the QR."""
     ensure_lvgl_runtime()
     from seedsigner.compat.l10n import gettext as _
     from seedsigner.models.settings import Settings, SettingsConstants

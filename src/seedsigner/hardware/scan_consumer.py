@@ -18,7 +18,7 @@ User cancel (the overlay's touch back button, or a hardware back/LEFT press) is
 surfaced through the injected `should_continue` callable — returning False ends
 the loop with a cancelled `ScanResult`, mirroring the Pi Zero KEY_LEFT semantics.
 
-Contract (in seedsigner-micropython-builder): docs/camera-pipeline-phase2-poll-contract.md
+Contract (defined in seedsigner-micropython-builder):
   - poll_new()    -> bytes | None      (drain the precious NEW ring to empty)
   - read_status() -> attrtuple(latest, consecutive_misses, dropped_new, has_corners)
   - report(FRAME_*, percent)           (drives cam_present() -> overlay dot/bar)
