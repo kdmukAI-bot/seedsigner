@@ -828,7 +828,7 @@ def _make_scan_should_continue(renderer=None):
     return should_continue
 
 
-def run_camera_scan(decoder):
+def run_camera_scan(decoder, *, instructions_text=None):
     """Drive the camera-scan pipeline for a QR scan on either hardware target.
 
     ``camera_scanner`` is a platform-specific C module that both targets build to one
@@ -853,6 +853,12 @@ def run_camera_scan(decoder):
          DecodeQR to reassemble in Python.
       3. Cancel check: ``should_continue`` is polled each frame so a user cancel — the
          overlay's back button or a hardware back/LEFT press — stops the loop promptly.
+
+    ``instructions_text`` is the localized hardware-mode overlay line (e.g.
+    "< back  |  Scan a QR code", built by ``scan_instructions_line``); it is handed to
+    ``camera_scanner.start`` so the overlay shows the back affordance + hint on entry.
+    None leaves the instruction slot empty. On the ESP's touch UI (persistent gutter
+    back button) the text is unused; start() accepts the kwarg there for contract parity.
 
     Returns the ScanResult; the caller reads ``decoder`` (the decoded payload) and
     ``result.cancelled`` to route. Returns ``None`` if the camera failed to start
@@ -894,7 +900,7 @@ def run_camera_scan(decoder):
                 _lv.set_flush_mode("python")
                 _lv.set_flush_callback(_make_flush_callback(renderer.disp))
         try:
-            camera_scanner.start()
+            camera_scanner.start(instructions_text=instructions_text)
         except OSError as e:
             # Native camera bring-up can fail (e.g. resource exhaustion after
             # repeated scans — a known camera-pipeline teardown leak). Don't let it

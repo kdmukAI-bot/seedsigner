@@ -6,6 +6,7 @@ from PIL import Image, ImageDraw
 
 from seedsigner.gui import renderer
 from seedsigner.gui.components import GUIConstants, Fonts, resize_image_to_fill
+from seedsigner.helpers.l10n import scan_instructions_line
 from seedsigner.models.decode_qr import DecodeQR
 from seedsigner.models.threads import BaseThread, ThreadsafeCounter
 
@@ -56,7 +57,7 @@ class ScanScreen(BaseScreen):
         super().__post_init__()
 
         # TODO: Arrange this with UI elements rather than text
-        self.instructions_text = "< " + _("back") + "  |  " + _(self.instructions_text)
+        self.instructions_text = scan_instructions_line(self.instructions_text)
 
         self.camera = Camera.get_instance()
         self.camera.start_video_stream_mode(resolution=self.resolution, framerate=self.framerate, format="rgb")
