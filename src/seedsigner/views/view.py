@@ -770,6 +770,8 @@ class OpeningSplashView(View):
         if self.force_partner_logos is not None:
             show_partner_logos = self.force_partner_logos
 
+        from seedsigner.helpers.version import Version
+
         # Native LVGL splash on both platforms. The firmware draws the centered logo at C
         # boot (MICROPY_BOARD_STARTUP, before the REPL/app), so on MicroPython the native
         # splash continues from that held logo — logo_already_shown skips the fade-in and
@@ -779,7 +781,7 @@ class OpeningSplashView(View):
         # View supplies only the localized text + the two booleans.
         self.run_screen(
             "opening_splash_screen",
-            version=f"v{self.controller.VERSION}",
+            version=Version.get_version_name(),
             show_partner_logos=show_partner_logos,
             # TRANSLATOR_NOTE: This is on the opening splash screen, displayed above the HRF logo
             sponsor_text=_("With support from:"),

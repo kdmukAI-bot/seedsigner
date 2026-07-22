@@ -1,10 +1,16 @@
 import json
 import logging
 import os
-import traceback
 
-from datetime import datetime, timezone
+try:
+    # Stock MicroPython 1.27 has neither module
+    import traceback
+    from datetime import datetime, timezone
+except ImportError:
+    traceback = None
+    datetime = timezone = None
 
+from seedsigner.compat import IS_MICROPYTHON
 from seedsigner.models.settings import Settings
 from seedsigner.models.singleton import Singleton
 
@@ -49,6 +55,10 @@ class Version(Singleton):
 
     In SeedSigner OS:
         * Version data is read exclusively from version.json at runtime.
+
+    On MicroPython (ESP32, on device):
+        * Version data is read exclusively from the firmware-frozen _version module — the
+          import-only analogue of version.json, baked by the builder at freeze time.
 
     In the SeedSigner OS builder:
     - Note: the build process relies on `git` being installed so we leverage it here.
@@ -103,7 +113,9 @@ class Version(Singleton):
     _version_name: str = None
     _version_fork: str = None
     _short_commit_hash: str = None
-    _version_timestamp: datetime = None
+    # datetime on CPython; on MicroPython the frozen _version ISO-8601 string — there is no
+    # datetime module on device.
+    _version_timestamp: "datetime | str" = None
 
 
     @classmethod
@@ -138,8 +150,19 @@ class Version(Singleton):
 
 
     @classmethod
-    def get_version_timestamp(cls) -> datetime | None:
-        return cls.get_instance()._version_timestamp
+    def get_version_timestamp(cls) -> str | None:
+        """
+        The version timestamp as an ISO-8601 string.
+        
+        CPython holds it internally as a datetime and serializes it here; MicroPython
+        reads the frozen _version ISO string directly (there is no datetime module on
+        device).
+        """
+        timestamp = cls.get_instance()._version_timestamp
+        if timestamp is None:
+            return None
+        # datetime (CPython) -> ISO string; already an ISO string on MicroPython.
+        return timestamp if IS_MICROPYTHON else timestamp.isoformat()
 
 
     @classmethod
@@ -239,6 +262,12 @@ class VersionUtils:
     VERSIONFILE_ATTR__SHORT_COMMIT_HASH = "short_commit_hash"
     VERSIONFILE_ATTR__TIMESTAMP = "timestamp"
 
+    # The MicroPython attrs in its frozen seedsigner._version
+    FROZEN_ATTR__NAME = "VERSION_NAME"
+    FROZEN_ATTR__FORK = "VERSION_FORK"
+    FROZEN_ATTR__SHORT_COMMIT_HASH = "SHORT_COMMIT_HASH"
+    FROZEN_ATTR__TIMESTAMP = "VERSION_TIMESTAMP"
+
 
     """ *************************************************************************************
     Top-level "get" calls. These are the only functions meant to be called externally.
@@ -248,6 +277,12 @@ class VersionUtils:
         """
             Will prefix the version name "v" if it looks like a semantic version.
         """
+        if IS_MICROPYTHON:
+            # On device the version is baked into the firmware at freeze time as the
+            # import-only _version module (the builder's frozen analogue of version.json).
+            name = cls._read_frozen_version(cls.FROZEN_ATTR__NAME)
+            return cls._prefix_version_name(name) if name else name
+
         if Settings.HOSTNAME == Settings.SEEDSIGNER_OS:
             # The SeedSigner OS build process generates the version.json file for the tag,
             # branch, or commit hash the image is targeting.
@@ -294,6 +329,9 @@ class VersionUtils:
 
         e.g. https://github.com/SeedSigner/seedsigner -> "SeedSigner"
         """
+        if IS_MICROPYTHON:
+            return cls._read_frozen_version(cls.FROZEN_ATTR__FORK)
+
         if Settings.HOSTNAME == Settings.SEEDSIGNER_OS:
             # The SeedSigner OS build process generates the version.json file which will
             # already contain the fork name.
@@ -324,6 +362,9 @@ class VersionUtils:
         Will be None if the local dev system has no git state available or if it only has
         the .git/HEAD but is currently on a branch (not a tag or specific commit).
         """
+        if IS_MICROPYTHON:
+            return cls._read_frozen_version(cls.FROZEN_ATTR__SHORT_COMMIT_HASH)
+
         if Settings.HOSTNAME == Settings.SEEDSIGNER_OS:
             return VersionUtils._get_short_commit_hash_from_version_file()
 
@@ -356,12 +397,22 @@ class VersionUtils:
 
 
     @classmethod
-    def get_version_timestamp(cls) -> datetime:
+    def get_version_timestamp(cls) -> "datetime | str | None":
         """
-        Returns a datetime object representing the last edit time of the source code via
-        the most recent git commit time (SeedSigner OS, as written in version.json) or
-        the most recently modified python source file (local dev).
+        Returns the last edit time of the source code.
+
+        * On CPython, a datetime — the most recent git commit time (SeedSigner OS: as
+        written in version.json) or the most recently modified python source file (local
+        dev).
+        
+        * On MicroPython, the frozen _version ISO-8601 string as-is; there is no datetime
+        module on device.
         """
+        if IS_MICROPYTHON:
+            # Frozen as a pre-serialized ISO-8601 string (there is no datetime on device);
+            # the consumer (VersionView) formats it for the screen.
+            return cls._read_frozen_version(cls.FROZEN_ATTR__TIMESTAMP)
+
         if Settings.HOSTNAME == Settings.SEEDSIGNER_OS:
             # The SeedSigner OS build process generates the version.json file which will
             # already contain the last edit time.
@@ -469,6 +520,28 @@ class VersionUtils:
         version_data = cls._read_version_file()
         if version_data:
             return version_data.get(cls.VERSIONFILE_ATTR__TIMESTAMP)
+
+
+
+    """ *************************************************************************************
+    Reading data from the frozen _version module (MicroPython / on device).
+    ************************************************************************************* """
+    @classmethod
+    def _read_frozen_version(cls, attr_name: str) -> str | None:
+        """
+        Return one field from the builder-frozen seedsigner._version module.
+
+        Frozen firmware content is import-only (it can't open() a json file), so the
+        builder ships the on-device version data as this frozen .py module rather than a
+        version.json. The import is guarded: _version exists ONLY in a builder-produced
+        firmware — never in the app repo, on the Pi, or in dev — so a missing module (or
+        missing attribute) yields None.
+        """
+        try:
+            from seedsigner import _version
+        except ImportError:
+            return None
+        return getattr(_version, attr_name, None)
 
 
 
