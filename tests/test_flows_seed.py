@@ -709,6 +709,87 @@ class TestMessageSigningFlows(FlowTest):
         ])
 
 
+    def test_sign_message_missing_message_aborts_cleanly(self):
+        """
+        If the sign-message flow is armed (Seed Options -> Sign Message) but the scan
+        produces a non-message QR (e.g. a SeedQR), that QR routes into its own flow and
+        eventually lands back on Seed Options still armed but without a captured message.
+        The resume block must treat that as an abort and show the Seed Options menu,
+        rather than resuming into SeedSignMessageConfirmMessageView and crashing on the
+        missing message.
+        """
+        self.settings.set_value(SettingsConstants.SETTING__MESSAGE_SIGNING, SettingsConstants.OPTION__ENABLED)
+
+        self.run_sequence([
+            FlowStep(MainMenuView, button_data_selection=MainMenuView.SCAN),
+            FlowStep(scan_views.ScanView, before_run=self.load_seed_into_decoder),  # load a seed to sign with
+            FlowStep(seed_views.SeedFinalizeView, button_data_selection=seed_views.SeedFinalizeView.FINALIZE),
+            FlowStep(seed_views.SeedOptionsView, button_data_selection=seed_views.SeedOptionsView.SIGN_MESSAGE),
+            # WRONG QR: a SeedQR at the message prompt -> the generic ScanView imports it as a seed
+            FlowStep(scan_views.ScanView, before_run=self.load_seed_into_decoder),
+            FlowStep(seed_views.SeedFinalizeView, button_data_selection=seed_views.SeedFinalizeView.FINALIZE),
+            # Back at Seed Options, armed but message-less: the guard aborts to the menu
+            # (previously this KeyError-ed in SeedSignMessageConfirmMessageView). Pick
+            # another option to prove the menu is live.
+            FlowStep(seed_views.SeedOptionsView, button_data_selection=seed_views.SeedOptionsView.BACKUP),
+            FlowStep(seed_views.SeedBackupView),
+        ])
+
+        # The guard disarmed the sign-message flow.
+        assert self.controller.resume_main_flow is None
+        assert self.controller.sign_message_data is None
+
+
+    def test_sign_message_back_from_review_returns_to_seed_options(self):
+        """
+        After a successful message scan (Seed Options -> Sign Message), backing out of
+        the message review must return to Seed Options, NOT reopen the scan camera.
+        `skip_current_view` on the sign-message scan route keeps ScanView off the back
+        stack so BackStackView lands on Seed Options.
+        """
+        self.settings.set_value(SettingsConstants.SETTING__MESSAGE_SIGNING, SettingsConstants.OPTION__ENABLED)
+
+        self.run_sequence([
+            FlowStep(MainMenuView, button_data_selection=MainMenuView.SCAN),
+            FlowStep(scan_views.ScanView, before_run=self.load_seed_into_decoder),
+            FlowStep(seed_views.SeedFinalizeView, button_data_selection=seed_views.SeedFinalizeView.FINALIZE),
+            FlowStep(seed_views.SeedOptionsView, button_data_selection=seed_views.SeedOptionsView.SIGN_MESSAGE),
+            FlowStep(scan_views.ScanView, before_run=self.load_short_message_into_decoder),
+            FlowStep(seed_views.SeedSignMessageStartView, is_redirect=True),
+            # Back out of the message review on page 0 -> exits the sign-message flow.
+            FlowStep(seed_views.SeedSignMessageConfirmMessageView, screen_return_value=RET_CODE__BACK_BUTTON),
+            # Lands on Seed Options (previously: reopened ScanView). Menu is live.
+            FlowStep(seed_views.SeedOptionsView, button_data_selection=seed_views.SeedOptionsView.BACKUP),
+            FlowStep(seed_views.SeedBackupView),
+        ])
+
+        # ConfirmMessage's page-0 back handler cleared the flow.
+        assert self.controller.resume_main_flow is None
+        assert self.controller.sign_message_data is None
+
+
+    def test_sign_message_scan_cancel_returns_home_cleanly(self):
+        """
+        Cancelling the message scan (Seed Options -> Sign Message -> back out of the
+        camera) returns to the Main Menu, and the controller's Home transition clears
+        resume_main_flow so a later return to Seed Options does not resume a
+        message-less sign-message flow. Locks in the safe cancel behavior so it can't
+        silently regress to routing back through Seed Options while still armed.
+        """
+        self.settings.set_value(SettingsConstants.SETTING__MESSAGE_SIGNING, SettingsConstants.OPTION__ENABLED)
+
+        self.run_sequence([
+            FlowStep(MainMenuView, button_data_selection=MainMenuView.SCAN),
+            FlowStep(scan_views.ScanView, before_run=self.load_seed_into_decoder),
+            FlowStep(seed_views.SeedFinalizeView, button_data_selection=seed_views.SeedFinalizeView.FINALIZE),
+            FlowStep(seed_views.SeedOptionsView, button_data_selection=seed_views.SeedOptionsView.SIGN_MESSAGE),
+            FlowStep(scan_views.ScanView),  # cancel: no QR captured
+            FlowStep(MainMenuView),
+        ])
+
+        assert self.controller.resume_main_flow is None
+
+
     def test_sign_message_network_mismatch_flow(self):
         """
         Should redirect to NetworkMismatchErrorView if a message's derivation path network doesn't match the current network.

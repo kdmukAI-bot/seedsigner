@@ -149,8 +149,12 @@ class ScanView(View):
                 from seedsigner.views.seed_views import SeedSignMessageStartView
                 qr_data = self.decoder.get_qr_data()
 
+                # skip_current_view so backing out of the message review returns to the
+                # flow's origin (Seed Options / seed selection) instead of reopening this
+                # camera, which would otherwise linger on the back stack.
                 return Destination(
                     SeedSignMessageStartView,
+                    skip_current_view=True,
                     view_args=dict(
                         derivation_path=qr_data["derivation_path"],
                         message=qr_data["message"],
