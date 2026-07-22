@@ -1,6 +1,7 @@
 import json
 import os
 import pytest
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 from unittest.mock import Mock, patch
@@ -1011,7 +1012,7 @@ class TestVersion(VersionBaseTest):
             Version.get_version_name() == TEST__VERSION_DICT[VersionUtils.VERSIONFILE_ATTR__NAME]
             Version.get_version_fork() == TEST__VERSION_DICT[VersionUtils.VERSIONFILE_ATTR__FORK]
             Version.get_short_commit_hash() == TEST__VERSION_DICT[VersionUtils.VERSIONFILE_ATTR__SHORT_COMMIT_HASH]
-            Version.get_version_timestamp() == TEST__VERSION_TIMESTAMP
+            Version.get_version_timestamp() == TEST__VERSION_TIMESTAMP.isoformat()
 
 
     def test_is_release_image(self):
@@ -1085,7 +1086,7 @@ class TestVersion(VersionBaseTest):
             assert Version.get_version_name() == TEST__VERSION_DICT[VersionUtils.VERSIONFILE_ATTR__NAME]
             assert Version.get_version_fork() == TEST__VERSION_DICT[VersionUtils.VERSIONFILE_ATTR__FORK]
             assert Version.get_short_commit_hash() == TEST__VERSION_DICT[VersionUtils.VERSIONFILE_ATTR__SHORT_COMMIT_HASH]
-            assert Version.get_version_timestamp() == TEST__VERSION_TIMESTAMP
+            assert Version.get_version_timestamp() == TEST__VERSION_TIMESTAMP.isoformat()
 
             # While we're in the mocked SeedSigner OS environment, verify that the
             # override is not allowed.
@@ -1109,14 +1110,14 @@ class TestVersion(VersionBaseTest):
         assert Version.get_version_name() == override_name
         assert Version.get_version_fork() == override_fork
         assert Version.get_short_commit_hash() == override_commit_hash
-        assert Version.get_version_timestamp() == override_timestamp
+        assert Version.get_version_timestamp() == override_timestamp.isoformat()
 
         # No overrides specified should result in no values changed.
         Version.override_data()
         assert Version.get_version_name() == override_name
         assert Version.get_version_fork() == override_fork
         assert Version.get_short_commit_hash() == override_commit_hash
-        assert Version.get_version_timestamp() == override_timestamp
+        assert Version.get_version_timestamp() == override_timestamp.isoformat()
 
 
 
@@ -1191,3 +1192,80 @@ class TestNotVersionBaseTest(BaseTest):
         """
         result = os.popen("echo 'Hello, World!'")
         assert not isinstance(result, mock.MagicMock)
+
+
+
+class TestVersion_MicroPythonFrozen(VersionBaseTest):
+    """
+    On MicroPython the git/version.json paths never run; Version reads the firmware-frozen
+    seedsigner._version module (the builder's frozen analogue of version.json). These tests
+    simulate that on the CPython test runner by pinning IS_MICROPYTHON=True and injecting a
+    fake frozen module.
+    """
+    FROZEN_MODULE_PATH = "seedsigner._version"
+
+    @contextmanager
+    def _frozen_version(self, **attrs):
+        """Inject a fake frozen seedsigner._version module with the given attrs, with
+        IS_MICROPYTHON pinned True; clean up on exit."""
+        import sys
+        import types
+        import seedsigner
+
+        module = types.ModuleType(self.FROZEN_MODULE_PATH)
+        for name, value in attrs.items():
+            setattr(module, name, value)
+
+        sys.modules[self.FROZEN_MODULE_PATH] = module
+        seedsigner._version = module
+        Version._instance = None
+        try:
+            with patch("seedsigner.helpers.version.IS_MICROPYTHON", True):
+                yield
+        finally:
+            sys.modules.pop(self.FROZEN_MODULE_PATH, None)
+            if hasattr(seedsigner, "_version"):
+                del seedsigner._version
+            Version._instance = None
+
+
+    def test_reads_all_fields_from_frozen_module(self):
+        with self._frozen_version(
+            VERSION_NAME="v0.8.7",
+            VERSION_FORK="SeedSigner",
+            SHORT_COMMIT_HASH=TEST__SHORT_COMMIT_HASH,
+            VERSION_TIMESTAMP="2026-07-21T14:30:00+00:00",
+        ):
+            assert Version.get_version_name() == "v0.8.7"
+            assert Version.get_version_fork() == "SeedSigner"
+            assert Version.get_short_commit_hash() == TEST__SHORT_COMMIT_HASH
+            # The frozen timestamp is a raw ISO-8601 string (no datetime on device); the
+            # consumer (VersionView) formats it for the screen.
+            assert Version.get_version_timestamp() == "2026-07-21T14:30:00+00:00"
+
+
+    def test_prefixes_a_bare_semantic_version_name(self):
+        # A build-time env override may supply a bare "0.8.7"; it gets the "v" prefix like
+        # every other path.
+        with self._frozen_version(VERSION_NAME="0.8.7"):
+            assert Version.get_version_name() == "v0.8.7"
+
+
+    def test_is_release_image_is_false_off_seedsigner_os(self):
+        # is_release_image() gates on SeedSigner OS, which MicroPython devices are not, so
+        # fork/commit rows are shown (never nulled) on device.
+        with self._frozen_version(VERSION_NAME="v0.8.7", VERSION_FORK="SeedSigner"):
+            assert Version.is_release_image() is False
+
+
+    def test_missing_frozen_module_yields_none(self):
+        # Defensive: the frozen module is absent in a bare overlay build. Every getter
+        # returns None (callers coerce name to "" and the View renders no timestamp).
+        import sys
+        sys.modules.pop(self.FROZEN_MODULE_PATH, None)
+        with patch("seedsigner.helpers.version.IS_MICROPYTHON", True):
+            Version._instance = None
+            assert Version.get_version_name() is None
+            assert Version.get_version_fork() is None
+            assert Version.get_short_commit_hash() is None
+            assert Version.get_version_timestamp() is None

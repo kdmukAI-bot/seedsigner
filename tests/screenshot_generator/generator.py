@@ -331,7 +331,7 @@ def generate_screenshots(locale):
             with patch.multiple(Version,
                 get_version_name=Mock(return_value=latest_release_version_name),
                 get_version_fork=Mock(return_value="SeedSigner"),
-                get_version_timestamp=Mock(return_value=latest_release_version_timestamp),
+                get_version_timestamp=Mock(return_value=latest_release_version_timestamp.isoformat() if latest_release_version_timestamp else None),
                 get_short_commit_hash=Mock(return_value="abcd1234")  # dummy value should be ignored
             ):
                 # Also have to mock us into SeedSigner OS

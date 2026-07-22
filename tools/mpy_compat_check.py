@@ -47,11 +47,11 @@ EXCLUDED_DIRS = [
 
 EXCLUDED_FILES = [
     "src/seedsigner/helpers/qr.py",
-    # CPython/Pi + builder-only module: a git-state explorer in local dev / the
-    # SeedSigner OS builder and a version.json reader on the Pi image. It never runs on
-    # MicroPython — the device's version is baked into the firmware at freeze time — and
-    # is guarded off the device import path, so it is intentionally not held to the
-    # MicroPython-compat contract.
+    # Import-safe on MicroPython (it reads the firmware-frozen _version module under
+    # IS_MICROPYTHON) but excluded from line-scanning: its CPython/Pi + builder-only paths —
+    # the git-state explorer, the version.json open(), the datetime/traceback use, the
+    # src-file timestamp scan — are guarded behind environment branches that never execute
+    # on device, and would spuriously trip the line-pattern checker.
     "src/seedsigner/helpers/version.py",
 ]
 

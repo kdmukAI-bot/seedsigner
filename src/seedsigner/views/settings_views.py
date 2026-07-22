@@ -5,7 +5,7 @@ from seedsigner.compat.l10n import gettext as _
 from seedsigner.gui.constants import GUIConstants, SeedSignerIconConstants, StatusType, ButtonStyle
 from seedsigner.models.settings import Settings, SettingsConstants, SettingsDefinition
 
-from .view import ButtonOption, Destination, MainMenuView, NotYetImplementedView, RET_CODE__BACK_BUTTON, View
+from .view import ButtonOption, Destination, MainMenuView, RET_CODE__BACK_BUTTON, View
 
 logger = logging.getLogger(__name__)
 
@@ -451,14 +451,6 @@ class DonateView(View):
 
 class VersionView(View):
     def run(self):
-        if IS_MICROPYTHON:
-            # helpers/version.py is a CPython/Pi + builder-only module (a git-state
-            # explorer in dev, a version.json reader on the Pi image) and must not be
-            # imported on MicroPython. On device the version is baked into the firmware at
-            # freeze time (a frozen version.json); wiring this View to read it is pending
-            # parity work, so stand it down until then.
-            return Destination(NotYetImplementedView)
-
         from seedsigner.helpers.version import Version
 
         version_fork = Version.get_version_fork()
@@ -469,12 +461,16 @@ class VersionView(View):
             version_fork = None
             short_commit_hash = None
 
+        timestamp = Version.get_version_timestamp()
+        version_timestamp = timestamp.replace("T", " ")[:19] + " UTC" if timestamp else ""
+
         self.run_screen(
-            settings_screens.VersionScreen,
-            version_name=Version.get_version_name(),
+            "version_screen",
+            title=_("Version"),
+            version_name=Version.get_version_name() or "",
             version_fork=version_fork,
-            version_timestamp=Version.get_version_timestamp(),
             short_commit_hash=short_commit_hash,
+            version_timestamp=version_timestamp,
         )
 
         return Destination(SettingsMenuView)
