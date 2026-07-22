@@ -727,6 +727,26 @@ class TestMessageSigningFlows(FlowTest):
         ])
 
 
+    def test_sign_message_scan_cancel_returns_home(self):
+        """
+        Cancelling the message scan returns to the Main Menu (parity with the PIL
+        ScanScreen flow), which clears resume_main_flow so a later return to Seed
+        Options can't resume the sign-message flow without a captured message.
+        """
+        self.settings.set_value(SettingsConstants.SETTING__MESSAGE_SIGNING, SettingsConstants.OPTION__ENABLED)
+
+        self.run_sequence([
+            FlowStep(MainMenuView, button_data_selection=MainMenuView.SCAN),
+            FlowStep(scan_views.ScanView, before_run=self.load_seed_into_decoder),  # simulate read SeedQR
+            FlowStep(seed_views.SeedFinalizeView, button_data_selection=seed_views.SeedFinalizeView.FINALIZE),
+            FlowStep(seed_views.SeedOptionsView, button_data_selection=seed_views.SeedOptionsView.SIGN_MESSAGE),
+            FlowStep(scan_views.ScanView, screen_return_value=False),  # cancel the message scan (back out of camera)
+            FlowStep(MainMenuView),
+        ])
+
+        assert self.controller.resume_main_flow is None
+
+
     def test_sign_message_network_mismatch_flow(self):
         """
         Should redirect to NetworkMismatchErrorView if a message's derivation path network doesn't match the current network.
