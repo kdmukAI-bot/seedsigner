@@ -34,6 +34,16 @@ env:
   PACK_REPO: kdmukAI-bot/seedsigner-language-packs
   PACK_REF: a9e39dabf60e093bb3d1494eb4728f83342c878b
 
+  # Native BC-UR (cUR) CPython binding. The pure-Python ur2 fallback was removed from the UR
+  # seams, so the ~14 @requires_native_ur tests SKIP unless the compiled `uUR` module is present.
+  # cUR is a public standalone repo that bundles its own SHA-256 (no OpenSSL/mbedTLS), so the host
+  # build is a plain tokenless pip install. Built per matrix leg (a C extension is Python-ABI-
+  # specific — it cannot be built once and shared as an artifact the way the packs are). Keep
+  # CUR_REF in lockstep with the cUR submodule pin in seedsigner-raspi-lvgl (host/Pi binding);
+  # builder's deps/cUR may lag by the host-binding commit, which the MicroPython build doesn't need.
+  CUR_REPO: kdmukAI-bot/cUR
+  CUR_REF: fd7b03f522fd8072a7e7528bfae6729304b22886
+
 jobs:
   build-language-packs:
     # Build the runtime language packs from the pinned pack repo, inside its pinned,
@@ -88,6 +98,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r tests/requirements.txt -r l10n/requirements-l10n.txt
           pip install -e .
+      - name: Build native cUR (uUR) binding
+        # Build the host `uUR` CPython extension from the pinned cUR ref so the UR-path tests run
+        # instead of skipping. Public repo -> tokenless git+https; bundled SHA-256, no external
+        # crypto deps. Runs in every matrix leg (ABI-specific build). The build-free
+        # tests/test_ur_native_adapters.py still covers the seam when uUR is absent, so a clean
+        # clone / local dev without cUR stays green.
+        run: pip install "git+https://github.com/${{ env.CUR_REPO }}.git@${{ env.CUR_REF }}"
       - name: Compile translations
         run: python setup.py compile_catalog
       # No-packs scenario (the other half of the screens CI model, §5): src/lang-packs is
