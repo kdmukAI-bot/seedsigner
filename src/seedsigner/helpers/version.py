@@ -122,8 +122,9 @@ class Version(Singleton):
     def get_instance(cls):
         """ This is the only way to access the one and only instance. """
         if not cls._instance:
-            # Instantiate the one and only Version instance
-            version = cls.__new__(cls)
+            # object.__new__ (not cls.__new__): MicroPython doesn't expose __new__
+            # as a class attribute, so cls.__new__(cls) raises AttributeError on-device.
+            version = object.__new__(cls)
             cls._instance = version
 
             # Populate version data
