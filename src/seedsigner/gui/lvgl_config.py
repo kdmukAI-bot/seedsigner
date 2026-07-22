@@ -18,8 +18,7 @@ held as float is corrupt, and a Bitcoin amount crossing the JSON contract is too
 to risk any float rounding. ``btc_amount_from_sats`` is a faithful integer-math port of
 ``gui.components.BtcAmount``'s denomination logic so both platforms format identically.
 
-See ``docs/reusable-component-config-builders-todo.md`` (the design note) and
-``docs/architecture/view-to-screen-json-contract.md`` (the runner contract).
+See ``docs/architecture/view-to-screen-json-contract.md`` (the runner contract).
 """
 from seedsigner.compat.l10n import gettext as _
 

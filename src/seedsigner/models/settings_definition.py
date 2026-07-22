@@ -324,7 +324,6 @@ class SettingsConstants:
     # (like ALL_CAMERA_ROTATIONS) so SettingsQR round-trips them; replaces the old Low/Medium/
     # High tiers. 2 is the extreme (densest) step — the biggest QR that exists; fine on a large
     # panel but marginal on a small one, so it stays opt-in and is never a default.
-    # See docs/qr-density-redesign-instructions.md.
     DENSITY__2 = 2
     DENSITY__3 = 3
     DENSITY__4 = 4
