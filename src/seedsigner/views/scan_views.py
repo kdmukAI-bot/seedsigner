@@ -50,7 +50,11 @@ class ScanView(View):
             # Camera failed to start; recover to a notice + the menu rather than crashing.
             return Destination(ScanCameraErrorView)
         if result.cancelled:
-            return Destination(BackStackView)
+            # Parity with the PIL ScanScreen flow: a cancelled scan returns to the
+            # Main Menu (the controller clears resume_main_flow on the Home
+            # transition), not one screen back. Returning BackStackView here left
+            # armed flows — notably sign-message — resuming without their data.
+            return Destination(MainMenuView)
 
         # Handle the results
         if self.decoder.is_complete:
