@@ -2328,12 +2328,13 @@ class SeedSignMessageConfirmAddressView(View):
             # TRANSLATOR_NOTE: Small gray label above the derivation path value
             derivation_path_label=_("derivation path"),
             address=self.address,
+            button_data=[ButtonOption("Sign message")],
         )
 
         if selected_menu_num == RET_CODE__BACK_BUTTON:
             return Destination(BackStackView)
 
-        # User clicked "Sign Message"
+        # User clicked "Sign message"
         return Destination(SeedSignMessageSignedMessageQRView)
 
 
