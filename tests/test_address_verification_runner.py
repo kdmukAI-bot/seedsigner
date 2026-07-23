@@ -1,23 +1,31 @@
 """Unit tests for the native address-verification driver
 (`run_seed_address_verification_screen`) in `seedsigner.gui.lvgl_screen_runner`.
 
-MicroPython-only in production (the View gates it by `IS_MICROPYTHON`); driven here on CPython
-with a faked native module + stubbed MicroPython-only `time.sleep_ms`.
+The driver runs on BOTH platforms in production; one shared poll loop with per-platform pump
+mechanics. These tests fake the native module and pin `IS_MICROPYTHON` to exercise each branch
+deterministically: the shared loop/cfg tests drive the MicroPython (poll-only) branch, and the
+CPython (blended display) tests at the bottom cover the pump/flush mechanics.
 """
 import sys
 import time
 from unittest.mock import MagicMock
 
 sys.modules.setdefault("seedsigner.hardware.buttons", MagicMock())
+# The CPython branch imports the Renderer singleton; stub the module so a standalone run of
+# this file doesn't pull in Pi display hardware deps (the full suite's base.py does the same).
+sys.modules.setdefault("seedsigner.gui.renderer", MagicMock())
 
 import seedsigner.gui.lvgl_screen_runner as lvgl_screen_runner
 from seedsigner.models.threads import ThreadsafeCounter
 
 
-def _patch_common(monkeypatch, fake_lv):
+def _patch_common(monkeypatch, fake_lv, is_micropython=True):
     monkeypatch.setattr(lvgl_screen_runner, "_lv", fake_lv)
     monkeypatch.setattr(lvgl_screen_runner, "ensure_lvgl_runtime", lambda: None)
     monkeypatch.setattr(lvgl_screen_runner, "_screensaver_timeout_ms", 60000)
+    # Pin the platform branch: the shared loop/cfg tests exercise the MicroPython
+    # (poll-only) branch; the CPython blended-display mechanics have their own tests.
+    monkeypatch.setattr(lvgl_screen_runner, "IS_MICROPYTHON", is_micropython)
     monkeypatch.setattr(time, "sleep_ms", lambda *a: None, raising=False)
 
 
@@ -93,3 +101,64 @@ def test_pushes_localized_progress_line(monkeypatch):
     _run(counter, ThreadsafeCounter(initial_value=None))
 
     fake_lv.seed_address_verification_set_progress.assert_called_with("Checking address 42")
+
+
+# ---------------------------------------------------------------------------
+# CPython / Pi Zero blended-display pump mechanics
+# ---------------------------------------------------------------------------
+
+def _patch_cpython(monkeypatch, fake_lv):
+    """Drive the CPython (blended display) branch: fake the Renderer singleton the driver
+    pulls in."""
+    _patch_common(monkeypatch, fake_lv, is_micropython=False)
+    import seedsigner.gui.renderer as renderer_mod
+    fake_renderer = MagicMock()
+    monkeypatch.setattr(renderer_mod, "Renderer",
+                        MagicMock(get_instance=MagicMock(return_value=fake_renderer)))
+    return fake_renderer
+
+
+def test_cpython_installs_and_clears_flush_callback_and_pumps(monkeypatch):
+    fake_lv = MagicMock()
+    fake_lv.poll_for_result.return_value = ("button_selected", 1, "Cancel")  # Cancel exits
+    _patch_cpython(monkeypatch, fake_lv)
+
+    result = _run(ThreadsafeCounter(), ThreadsafeCounter(initial_value=None))
+
+    assert result is False
+    # Blended display: python flush mode + callback installed at build, dropped on exit.
+    fake_lv.set_flush_mode.assert_called_once_with("python")
+    assert fake_lv.set_flush_callback.call_args_list[0][0][0] is not None
+    assert fake_lv.set_flush_callback.call_args_list[-1][0][0] is None
+    # LVGL only advances on a host pump here (the native task does this on MicroPython).
+    assert fake_lv.lvgl_pump.called
+
+
+def test_cpython_stops_loading_pump_and_resets_input_timer(monkeypatch):
+    fake_lv = MagicMock()
+    fake_lv.poll_for_result.return_value = ("button_selected", 1, "Cancel")
+    _patch_cpython(monkeypatch, fake_lv)
+
+    stop_calls = []
+    monkeypatch.setattr(lvgl_screen_runner, "stop_loading_pump", lambda: stop_calls.append(1))
+    import seedsigner.hardware.buttons as buttons_mod
+    fake_hw_buttons = MagicMock()
+    monkeypatch.setattr(buttons_mod, "HardwareButtons", fake_hw_buttons)
+
+    _run(ThreadsafeCounter(), ThreadsafeCounter(initial_value=None))
+
+    # A caller may hand over with a loading spinner still animating; this driver stops it.
+    assert stop_calls == [1]
+    # Exit resets the PIL-side input timer so the next PIL screen doesn't insta-screensave.
+    fake_hw_buttons.get_instance.return_value.update_last_input_time.assert_called_once()
+
+
+def test_cpython_worker_match_returns_true(monkeypatch):
+    fake_lv = MagicMock()
+    fake_lv.poll_for_result.return_value = None  # no button; the worker match drives the exit
+    _patch_cpython(monkeypatch, fake_lv)
+
+    verified_index = ThreadsafeCounter(initial_value=None)
+    verified_index.set_value(7)  # worker already found the address
+
+    assert _run(ThreadsafeCounter(), verified_index) is True
