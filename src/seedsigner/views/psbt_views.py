@@ -340,6 +340,8 @@ class PSBTAddressDetailsView(View):
             title=title,
             button_data=button_data,
             address=psbt_parser.destination_addresses[self.address_num],
+            # Network code (SettingsConstants M/T/R) tints the address head/tail on the screen.
+            network=self.settings.get_value(SettingsConstants.SETTING__NETWORK),
             btc_amount=btc_amount_from_sats(psbt_parser.destination_amounts[self.address_num]),
         )
         
@@ -492,6 +494,8 @@ class PSBTChangeDetailsView(View):
             title=title,
             button_data=button_data,
             address=change_data.get("address"),
+            # Network code (SettingsConstants M/T/R) tints the address head/tail on the screen.
+            network=self.settings.get_value(SettingsConstants.SETTING__NETWORK),
             btc_amount=btc_amount_from_sats(change_data.get("amount")),
             address_type_label=address_type_label,
             is_verified=is_change_addr_verified,
