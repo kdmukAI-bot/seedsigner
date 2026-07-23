@@ -1988,15 +1988,11 @@ class SeedAddressVerificationView(View):
             type_network = f"{sig_type_display} - {script_type_display}"
             if not is_mainnet:
                 type_network += f" ({network_display})"
-            native_network = {
-                SettingsConstants.MAINNET: "mainnet",
-                SettingsConstants.TESTNET: "testnet",
-                SettingsConstants.REGTEST: "regtest",
-            }.get(self.network, "mainnet")
             run_seed_address_verification_screen(
                 address=self.address,
                 type_network=type_network,
-                network=native_network,
+                # Network code (SettingsConstants M/T/R) tints the address head/tail on the screen.
+                network=self.network,
                 title=_("Verify Address"),
                 skip_label=self.SKIP_10.resolved_label(),
                 cancel_label=self.CANCEL.resolved_label(),
@@ -2092,6 +2088,8 @@ class SeedAddressVerificationSuccessView(View):
             title=_("Success!"),
             status_headline=_("Address Verified"),
             address=unverified_address["address"],
+            # Network code (SettingsConstants M/T/R) tints the address head/tail on the screen.
+            network=unverified_address["network"],
             address_type_text=address_type,
             # TRANSLATOR_NOTE: Describes the address index (e.g. "index 7")
             index_text=_("index {}").format(unverified_address["verified_index"]),
@@ -2298,6 +2296,9 @@ class SeedSignMessageConfirmAddressView(View):
                 self.controller.sign_message_data = None
                 return
 
+        # Resolved network code (SettingsConstants M/T/R); tints the confirm-address readout.
+        self.network = addr_format["network"]
+
         xpub = seed.get_xpub(wallet_path=addr_format["wallet_derivation_path"], network=addr_format["network"])
         embit_network = embit_utils.get_embit_network_name(addr_format["network"])
         self.address = embit_utils.get_single_sig_address(xpub=xpub, script_type=addr_format["script_type"], index=addr_format["index"], is_change=addr_format["is_change"], embit_network=embit_network)
@@ -2311,6 +2312,8 @@ class SeedSignMessageConfirmAddressView(View):
             # TRANSLATOR_NOTE: Small gray label above the derivation path value
             derivation_path_label=_("derivation path"),
             address=self.address,
+            # Network code (SettingsConstants M/T/R) tints the address head/tail on the screen.
+            network=self.network,
             button_data=[ButtonOption("Sign message")],
         )
 
