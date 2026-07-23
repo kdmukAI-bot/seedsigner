@@ -409,7 +409,9 @@ def generate_screenshots(locale):
 
                 ScreenshotConfig(seed_views.SeedSelectSeedView, dict(flow=Controller.FLOW__VERIFY_SINGLESIG_ADDR), screenshot_name="SeedSelectSeedView_address_verification"),
                 ScreenshotConfig(seed_views.AddressVerificationSigTypeView),
-                ScreenshotConfig(seed_views.SeedAddressVerificationView,        dict(seed_num=0), mock_context_manager=mock_address_verification_data_loaded),
+                # SeedAddressVerificationView migrated to the native seed_address_verification_screen
+                # (a bespoke host-driven runner); the PIL generator can't drive its worker/poll loop.
+                # ScreenshotConfig(seed_views.SeedAddressVerificationView,        dict(seed_num=0), mock_context_manager=mock_address_verification_data_loaded),
                 ScreenshotConfig(seed_views.SeedAddressVerificationSuccessView, dict(seed_num=0), mock_context_manager=mock_address_verification_data_loaded),
 
                 ScreenshotConfig(seed_views.LoadMultisigWalletDescriptorView),

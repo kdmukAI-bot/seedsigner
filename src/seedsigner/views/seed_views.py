@@ -1966,12 +1966,10 @@ class SeedAddressVerificationView(View):
 
     def run(self):
         # Start brute-force calculations from the zero-th index
-        from seedsigner.compat import IS_MICROPYTHON
+        from seedsigner.gui.lvgl_screen_runner import run_seed_address_verification_screen
 
         try:
             self.addr_verification_thread.start()
-
-            button_data = [self.SKIP_10, self.CANCEL]
 
             script_type_settings_entry = SettingsDefinition.get_settings_entry(SettingsConstants.SETTING__SCRIPT_TYPES)
             script_type_display = script_type_settings_entry.get_selection_option_display_name_by_value(self.script_type)
@@ -1984,68 +1982,29 @@ class SeedAddressVerificationView(View):
             mainnet = network_settings_entry.get_selection_option_display_name_by_value(SettingsConstants.MAINNET)
             is_mainnet = network_display == mainnet
 
-            if IS_MICROPYTHON:
-                # Native path: a static address / type readout + a host-driven live "Checking
-                # address N" progress line (the runner owns the poll/push loop; the worker +
-                # match logic stay here). type_network mirrors the PIL screen's composed line.
-                from seedsigner.gui.lvgl_screen_runner import run_seed_address_verification_screen
-                type_network = f"{sig_type_display} - {script_type_display}"
-                if not is_mainnet:
-                    type_network += f" ({network_display})"
-                native_network = {
-                    SettingsConstants.MAINNET: "mainnet",
-                    SettingsConstants.TESTNET: "testnet",
-                    SettingsConstants.REGTEST: "regtest",
-                }.get(self.network, "mainnet")
-                # SKIP_10 increments the shared counter inside the driver's loop; verified_index
-                # remains the source of truth for success below, so the return is not needed.
-                run_seed_address_verification_screen(
-                    address=self.address,
-                    type_network=type_network,
-                    network=native_network,
-                    title=_("Verify Address"),
-                    skip_label=self.SKIP_10.resolved_label(),
-                    cancel_label=self.CANCEL.resolved_label(),
-                    threadsafe_counter=self.threadsafe_counter,
-                    verified_index=self.verified_index,
-                )
-
-            else:
-                # PIL path (CPython / Pi Zero blended display), kept until the dynamic-screen
-                # cutover. Re-display the Screen in a loop so a SKIP_10 press bumps the counter
-                # and resumes; the Screen's own ProgressThread paints the live count.
-                from seedsigner.gui.screens import seed_screens
-                while True:
-                    selected_menu_num = self.run_screen(
-                        seed_screens.SeedAddressVerificationScreen,
-                        address=self.address,
-                        derivation_path=self.derivation_path,
-                        script_type=script_type_display,
-                        sig_type=sig_type_display,
-                        network=network_display,
-                        is_mainnet=is_mainnet,
-                        threadsafe_counter=self.threadsafe_counter,
-                        verified_index=self.verified_index,
-                        button_data=button_data,
-                    )
-
-                    if self.verified_index.cur_count is not None:
-                        break
-
-                    if selected_menu_num == RET_CODE__BACK_BUTTON:
-                        break
-
-                    if selected_menu_num is None:
-                        # Only happens in the test suite; the screen isn't actually executed so
-                        # it returns before the brute force thread has completed.
-                        time.sleep(0.1)
-                        continue
-
-                    if button_data[selected_menu_num] == self.SKIP_10:
-                        self.threadsafe_counter.increment(10)
-
-                    elif button_data[selected_menu_num] == self.CANCEL:
-                        break
+            # Native screen on both platforms: a static address / type readout + a host-driven
+            # live "Checking address N" progress line (the runner owns the poll/push loop; the
+            # worker + match logic stay here). type_network mirrors the composed line. SKIP_10
+            # increments the shared counter inside the driver's loop; verified_index remains the
+            # source of truth for success below.
+            type_network = f"{sig_type_display} - {script_type_display}"
+            if not is_mainnet:
+                type_network += f" ({network_display})"
+            native_network = {
+                SettingsConstants.MAINNET: "mainnet",
+                SettingsConstants.TESTNET: "testnet",
+                SettingsConstants.REGTEST: "regtest",
+            }.get(self.network, "mainnet")
+            run_seed_address_verification_screen(
+                address=self.address,
+                type_network=type_network,
+                network=native_network,
+                title=_("Verify Address"),
+                skip_label=self.SKIP_10.resolved_label(),
+                cancel_label=self.CANCEL.resolved_label(),
+                threadsafe_counter=self.threadsafe_counter,
+                verified_index=self.verified_index,
+            )
 
             if self.verified_index.cur_count is not None:
                 # Successfully verified the addr; update the data

@@ -1480,7 +1480,7 @@ def run_seed_address_verification_screen(*, address, type_network, network, titl
                                          skip_label, cancel_label,
                                          threadsafe_counter, verified_index,
                                          allow_screensaver=False):
-    """Drive the native seed_address_verification_screen (MicroPython / ESP32).
+    """Drive the native seed_address_verification_screen (both platforms).
 
     The native screen is a static address / type-network readout plus a live "Checking address
     N" progress line pushed via ``seed_address_verification_set_progress()``. The host owns the
@@ -1488,9 +1488,15 @@ def run_seed_address_verification_screen(*, address, type_network, network, titl
     this loop only reflects them: build the screen once, then poll for Skip 10 / Cancel while
     pushing the progress line and watching ``verified_index`` for a match. Skip 10 bumps the
     worker's counter and keeps scanning; Cancel gives up. Returns True when the worker matched
-    the address, False on Cancel. Mirrors ``run_qr_display_screen`` (build-and-return + a Python
-    poll loop); the native screen forces show_back_button off, so the only buttons are Skip 10
-    (index 0) and Cancel (index 1)."""
+    the address, False on Cancel. The native screen forces show_back_button off, so the only
+    buttons are Skip 10 (index 0) and Cancel (index 1).
+
+    One poll loop, two pump mechanics — ``run_lvgl_screen``'s split: MicroPython's native task
+    pumps LVGL and owns the display, so this loop only polls; CPython / Pi Zero (blended display)
+    pumps LVGL itself under ``renderer.lock`` and routes pixels through the PIL driver's flush
+    callback. The Pi routes here rather than to the PIL SeedAddressVerificationScreen because
+    that screen reads GPIO through ``HardwareButtons`` — a second input reader, independent of
+    the native input gate."""
     ensure_lvgl_runtime()
     from seedsigner.compat.l10n import gettext as _
 
@@ -1512,23 +1518,56 @@ def run_seed_address_verification_screen(*, address, type_network, network, titl
     # screen's duration (mirrors run_qr_display_screen / run_camera_scan), then restore.
     if not allow_screensaver:
         _lv.set_screensaver_timeout(0)
+    renderer = None
     try:
-        _lv.clear_result_queue()
-        _lv.seed_address_verification_screen(cfg)
+        if IS_MICROPYTHON:
+            _lv.clear_result_queue()
+            _lv.seed_address_verification_screen(cfg)
+        else:
+            # CPython / Pi Zero blended display: LVGL only advances on a host pump, so the poll
+            # loop below pumps under renderer.lock (PIL and LVGL never write the panel
+            # concurrently) with pixels routed through the PIL driver's flush callback —
+            # run_lvgl_screen's mechanics. A caller may hand over with a loading spinner still
+            # animating on its background pump, so stop it here. TRANSITIONAL: this branch
+            # collapses into the MicroPython one at the Pi native display-pump cutover.
+            stop_loading_pump()
+            from seedsigner.gui.renderer import Renderer
+            renderer = Renderer.get_instance()
+            with renderer.lock:
+                _lv.set_flush_mode("python")
+                _lv.set_flush_callback(_make_flush_callback(renderer.disp))
+                _lv.clear_result_queue()
+                _lv.seed_address_verification_screen(cfg)
+
         while True:
-            event = _lv.poll_for_result()
+            if IS_MICROPYTHON:
+                event = _lv.poll_for_result()
+            else:
+                with renderer.lock:
+                    _lv.lvgl_pump(5, 1)
+                    event = _lv.poll_for_result()
             if event is not None:
-                result = _translate_event(event)
-                if result == 0:
+                if _translate_event(event) == 0:
                     # Skip 10: jump the worker ahead and keep scanning.
                     threadsafe_counter.increment(10)
                     continue
                 # Cancel (index 1): give up.
-                return False
+                matched = False
+                break
             if verified_index.cur_count is not None:
-                return True
+                matched = True
+                break
             _lv.seed_address_verification_set_progress(_progress_text())
             _sleep_ms(100)
+
+        if not IS_MICROPYTHON:
+            # Reset the PIL-side input timer so returning to a PIL screen doesn't immediately
+            # re-trigger the PIL screensaver (dies with HardwareButtons at its retirement).
+            from seedsigner.hardware.buttons import HardwareButtons
+            HardwareButtons.get_instance().update_last_input_time()
+        return matched
     finally:
+        if not IS_MICROPYTHON:
+            _lv.set_flush_callback(None)
         if not allow_screensaver:
             _lv.set_screensaver_timeout(_screensaver_timeout_ms)
