@@ -1476,6 +1476,111 @@ def run_camera_entropy(*, seed_hash=None):
         _lv.set_screensaver_timeout(_screensaver_timeout_ms)
 
 
+def run_io_test_screen():
+    """Drive the native hardware I/O self-test (Python provenance: IOTestScreen).
+
+    Unlike the passive screens, io_test_screen owns its own keypad input: it reads the
+    joystick/keys itself and flashes whichever control the user actuates, forwarding only
+    KEY1/KEY2/KEY3 to this loop as ("aux_key", 0, "KEYn") poll-queue results. It emits no
+    terminal navigation result — the host runs the self-test loop and reaps the screen by
+    navigating on. Mirrors Python IOTestScreen._run:
+
+        KEY1 -> "Capturing image..." band, grab one still + show it behind the chrome,
+                then latch KEY2 = "Clear"  (io_test_set_capture_state CAPTURING -> CAPTURED)
+        KEY2 -> clear the captured still                        (-> CAPTURE_IDLE)
+        KEY3 -> exit the self-test
+
+    Pi-hardware only (physical joystick + three keys), so the native io_test_screen forces
+    INPUT_MODE_HARDWARE; the caller keeps it off the ESP/touch build (which binds no
+    io_test_screen). Returns None; the caller navigates on.
+    """
+    ensure_lvgl_runtime()
+    from seedsigner.compat.l10n import gettext as _
+
+    # io_test_screen capture-state ints (mirror seedsigner.h io_test_capture_state_t): the
+    # host reflects its single-frame grab back into the running screen.
+    CAPTURE_IDLE, CAPTURE_CAPTURING, CAPTURE_CAPTURED = 0, 1, 2
+    # The KEY1 capturing window: pump cycles during which the camera engine feeds frames into
+    # the screen's plane before the last is frozen. Each _tick runs one lvgl_pump (->
+    # camera_engine_pump_consume), so this also lets the exposure settle; tune on-device.
+    CAPTURING_HOLD_TICKS = 25
+
+    # title -> top_nav.title; the band + KEY labels pass straight through. Composed from the
+    # same msgids as the PIL IOTestScreen, so the wording and its translations carry over.
+    cfg = _assemble_cfg({
+        "title": _("I/O Test"),
+        "capturing_text": _("Capturing image..."),
+        "clear_label": _("Clear"),
+        "exit_label": _("Exit"),
+    })
+
+    # Same platform split as run_camera_entropy: the Pi shares the panel with PIL, so this
+    # runner installs the flush callback and pumps LVGL itself — the native screen animates
+    # the control flashes + the capturing band, all of which need pumping to reach the
+    # panel — while MicroPython's firmware task owns the pump + display, so Python only polls.
+    renderer = None
+    if not IS_MICROPYTHON:
+        from seedsigner.gui.renderer import Renderer
+        renderer = Renderer.get_instance()
+
+    def _tick(ms):
+        if renderer is not None:
+            with renderer.lock:
+                _lv.lvgl_pump(5, 1)
+        _sleep_ms(ms)
+
+    try:
+        # Build under renderer.lock on the Pi so PIL and LVGL never write the panel at once
+        # (as run_lvgl_screen does); MicroPython builds lock-free. Drop any stale UI event
+        # (e.g. the menu press that launched us) so it can't be misread as a KEY press.
+        if renderer is not None:
+            with renderer.lock:
+                _lv.set_flush_mode("python")
+                _lv.set_flush_callback(_make_flush_callback(renderer.disp))
+                _lv.clear_result_queue()
+                _lv.io_test_screen(cfg)
+        else:
+            _lv.clear_result_queue()
+            _lv.io_test_screen(cfg)
+
+        while True:
+            event = _lv.poll_for_result()
+            if event is None:
+                _tick(20)
+                continue
+            kind, _index, label = event
+            if kind != "aux_key":
+                # io_test_screen forwards only KEY1/2/3; ignore anything else on the queue.
+                continue
+            if label == "KEY1":
+                # Grab a still and show it behind the chrome (Python's single-frame grab).
+                # io_test_camera_start feeds the screen's camera plane from the engine; each
+                # pump in the hold below flows one frame in (camera_engine_pump_consume), and
+                # io_test_camera_stop freezes the last one. The plane + its dims + the blit are
+                # owned by the screen (SCREENS-9) — the app only starts/stops the feed.
+                _lv.io_test_set_capture_state(CAPTURE_CAPTURING)   # "Capturing…" band up
+                captured = False
+                try:
+                    _lv.io_test_camera_start()
+                    for _ in range(CAPTURING_HOLD_TICKS):
+                        _tick(20)
+                    captured = True
+                except OSError as e:
+                    # Camera bring-up failed: leave the square dark, nothing captured.
+                    logger.error("io_test camera grab failed: %r", e)
+                finally:
+                    _lv.io_test_camera_stop()   # freeze the last frame (idempotent)
+                # Band down; KEY2 -> "Clear" on a real capture, blank if the grab failed.
+                _lv.io_test_set_capture_state(CAPTURE_CAPTURED if captured else CAPTURE_IDLE)
+            elif label == "KEY2":
+                _lv.io_test_set_capture_state(CAPTURE_IDLE)       # clear the still
+            elif label == "KEY3":
+                return  # exit -> caller navigates on, reaping the screen
+    finally:
+        if renderer is not None:
+            _lv.set_flush_callback(None)
+
+
 def run_seed_address_verification_screen(*, address, type_network, network, title,
                                          skip_label, cancel_label,
                                          threadsafe_counter, verified_index,

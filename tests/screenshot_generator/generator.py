@@ -466,7 +466,10 @@ def generate_screenshots(locale):
                 # ScreenshotConfig(tools_views.ToolsAddressExplorerAddressView),
             ],
             "Settings Views": settings_views_list + [
-                ScreenshotConfig(settings_views.IOTestView),
+                # IOTestView migrated to the native io_test_screen (run_io_test_screen), so it
+                # no longer renders in the PIL screenshot generator; its capture is produced by
+                # the seedsigner-lvgl-screens desktop generator (scenario: io_test_screen).
+                # ScreenshotConfig(settings_views.IOTestView),
                 ScreenshotConfig(settings_views.DonateView),
                 ScreenshotConfig(settings_views.VersionView, mock_context_manager=mock_version_to_most_recent_release),
                 ScreenshotConfig(settings_views.VersionView, screenshot_name="VersionView_current_git_state"),
