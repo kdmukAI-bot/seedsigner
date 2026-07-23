@@ -195,7 +195,8 @@ class FlowTest(BaseTest):
                  patch("seedsigner.views.view.View.run_qr_display_screen", autospec=True) as mock_run_qr_display_screen, \
                  patch("seedsigner.gui.lvgl_screen_runner.run_camera_scan") as mock_run_camera_scan, \
                  patch("seedsigner.gui.lvgl_screen_runner.run_camera_preview_scan") as mock_run_camera_preview_scan, \
-                 patch("seedsigner.gui.lvgl_screen_runner.run_seed_address_verification_screen") as mock_run_seed_address_verification:
+                 patch("seedsigner.gui.lvgl_screen_runner.run_seed_address_verification_screen") as mock_run_seed_address_verification, \
+                 patch("seedsigner.gui.lvgl_screen_runner.run_io_test_screen") as mock_run_io_test_screen:
                 def run_view(destination: Destination, *args, **kwargs):
                     """ Replaces Destination._run_view() """
                     if len(sequence) == 0:
@@ -343,6 +344,13 @@ class FlowTest(BaseTest):
                         time.sleep(0.02)
                     return True
                 mock_run_seed_address_verification.side_effect = native_address_verification
+
+                # IOTestView routes straight to the native runner (no View.run_screen hop): a
+                # self-owned-input hardware self-test that returns nothing. Bump the run_screen
+                # mock once so the flow harness's call-count-based redirect check sees it ran.
+                def native_io_test(*args, **kwargs):
+                    mock_run_screen(None, "io_test_screen")
+                mock_run_io_test_screen.side_effect = native_io_test
 
                 # Start the Controller with the first View_cls specified in the test sequence
                 if sequence[0].expected_view != MainMenuView:

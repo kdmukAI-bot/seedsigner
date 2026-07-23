@@ -427,9 +427,17 @@ class SettingsIngestSettingsQRView(View):
 ****************************************************************************"""
 class IOTestView(View):
     def run(self):
-        from seedsigner.gui.screens import settings_screens
+        # The hardware I/O self-test: the native io_test_screen owns its own keypad input,
+        # flashing each joystick/key as it's pressed and forwarding KEY1 (grab) / KEY2
+        # (clear) / KEY3 (exit) into run_io_test_screen's loop. It's a Pi-hardware test
+        # (physical joystick + three keys); the ESP/touch build binds no io_test_screen, so
+        # it stays a not-yet-built placeholder there.
+        if IS_MICROPYTHON:
+            from seedsigner.views.view import NotYetImplementedView
+            return Destination(NotYetImplementedView)
 
-        self.run_screen(settings_screens.IOTestScreen)
+        from seedsigner.gui.lvgl_screen_runner import run_io_test_screen
+        run_io_test_screen()
 
         return Destination(SettingsMenuView)
 
