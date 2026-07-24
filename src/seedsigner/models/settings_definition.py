@@ -232,6 +232,11 @@ class SettingsConstants:
         return (locale, endonym or locale)
 
 
+    # One microSD mount point for ESP32 (MicroPython): the persisted settings file,
+    # the gettext catalogs, and the font packs all live under it, so it is defined once
+    # here and referenced everywhere else so those paths can't drift apart.
+    MICROSD_MOUNT = "/sd"
+
     @classmethod
     def get_catalog_root(cls):
         """Root under which per-locale translation catalogs live, as
@@ -253,7 +258,7 @@ class SettingsConstants:
         """
         from seedsigner.compat import IS_MICROPYTHON
         if IS_MICROPYTHON:
-            return "/sd"
+            return cls.MICROSD_MOUNT
         return "lang-packs"
 
 

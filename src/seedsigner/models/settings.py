@@ -34,12 +34,29 @@ class InvalidSettingsQRData(Exception):
 class Settings(Singleton):
     HOSTNAME = os.uname()[1]
     SEEDSIGNER_OS = "seedsigner-os"
-    SETTINGS_FILENAME = "/mnt/microsd/settings.json" if HOSTNAME == SEEDSIGNER_OS else "settings.json"
-        
+
+    # Persisted settings.json location. ESP32 keeps it on the microSD (the only
+    # user-writable area; internal flash is read-mostly and wiped on reflash). A
+    # pre-existing /settings.json on internal flash is NOT migrated, so such a device
+    # reads defaults until Persistent Settings is re-enabled.
+    if IS_MICROPYTHON:
+        SETTINGS_FILENAME = SettingsConstants.MICROSD_MOUNT + "/settings.json"
+    elif HOSTNAME == SEEDSIGNER_OS:
+        SETTINGS_FILENAME = "/mnt/microsd/settings.json"   # SeedSigner OS (unchanged)
+    else:
+        SETTINGS_FILENAME = "settings.json"                # CPython dev (unchanged)
+
     @classmethod
     def get_instance(cls):
         # This is the only way to access the one and only instance
         if cls._instance is None:
+            # ESP32: settings.json and the gettext catalogs both live on the microSD,
+            # which nothing has mounted this early in boot. Mount it now — before the
+            # read below and the bindtextdomain() lookup — so a persisted-at-boot setting
+            # and locale apply from the first paint. A no-op off ESP32.
+            from seedsigner.hardware.microsd import MicroSD  # local import: avoid circular import
+            MicroSD.ensure_mounted()
+
             # Instantiate the one and only instance
             settings = object.__new__(cls)
             cls._instance = settings
