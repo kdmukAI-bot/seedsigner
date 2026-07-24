@@ -565,6 +565,28 @@ def dismiss_toast():
         logger.exception("dismiss_toast failed")
 
 
+def get_inactive_time_ms():
+    """Milliseconds since the last input activity on the LVGL display, or ``None`` when the
+    native runtime is absent (dev/CI/host tests).
+
+    Thin host wrapper over the native ``get_inactive_time_ms()``: any keypad press resets the
+    display's activity clock toward 0, so a small value means the user just interacted. This
+    is the native replacement for the ``HardwareButtons.has_any_input()`` poll behind the
+    toast pre-show activation-delay cancel. Presses only register while the runtime is pumped,
+    so the reading is meaningful only over a live native screen (whose runner pumps) — which
+    is exactly the context a toast shows in.
+    """
+    try:
+        ensure_lvgl_runtime()
+    except ImportError:
+        return None
+    try:
+        return _lv.get_inactive_time_ms()
+    except Exception:
+        logger.exception("get_inactive_time_ms failed")
+        return None
+
+
 def run_lvgl_screen(renderer, screen, *, attrs=None):
     """Run an LVGL screen while holding the renderer lock; return its result.
 

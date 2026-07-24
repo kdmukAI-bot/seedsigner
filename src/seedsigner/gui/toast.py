@@ -39,27 +39,24 @@ class BaseToastOverlayManagerThread(BaseThread):
                  activation_delay: int = 0,  # seconds before the toast is shown
                  duration: int = 3,          # seconds the toast stays up (0 = until replaced/dismissed)
                  ):
-        from seedsigner.hardware.buttons import HardwareButtons
         super().__init__()
         self.activation_delay: int = activation_delay
         self.duration: int = duration
 
-        self.hw_inputs = HardwareButtons.get_instance()
-
-        # Special case when the screensaver is running: allow a toast to register even mid
-        # -screensaver (matches the pre-native behavior).
-        self.hw_inputs.override_ind = True
-
     def run(self):
-        from seedsigner.gui.lvgl_screen_runner import show_toast
+        from seedsigner.gui.lvgl_screen_runner import show_toast, get_inactive_time_ms
 
         logger.info(f"{self.__class__.__name__}: started")
         start = time.time()
 
-        # Pre-show activation delay; a button press before the toast appears cancels it
-        # (the user is still interacting, so the tip is unwanted).
+        # Pre-show activation delay; input before the toast appears cancels it (the user is
+        # still interacting, so the tip is unwanted). The native inactivity clock resets on
+        # any keypad press, so a reading younger than how long we've waited means a press
+        # landed after the delay began. (The native overlay owns dismissal once the toast is
+        # up; this covers only the not-yet-shown window, which it has no notion of.)
         while time.time() - start < self.activation_delay:
-            if self.hw_inputs.has_any_input():
+            inactive_ms = get_inactive_time_ms()
+            if inactive_ms is not None and inactive_ms < (time.time() - start) * 1000:
                 logger.info(f"{self.__class__.__name__}: canceled before showing (user input)")
                 return
             time.sleep(0.1)
