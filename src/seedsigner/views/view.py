@@ -202,13 +202,6 @@ class View:
         ``run_button_list_screen`` / ``run_status_screen`` helpers are the documented entry
         points for those families; bare ``run_screen`` serves main_menu and one-offs.
         """
-        # A CPython loading spinner may be animating on a background pump; stop it here — the
-        # one seam every successor screen (PIL or LVGL) passes through — so this screen takes
-        # the panel cleanly. No-op on MicroPython / when none is active. Lazy import avoids
-        # the runner<->view import cycle. TRANSITIONAL: removed at the Pi display-pump cutover.
-        from seedsigner.gui.lvgl_screen_runner import stop_loading_pump
-        stop_loading_pump()
-
         if isinstance(screen, type):
             if IS_MICROPYTHON:
                 # A PIL Screen *class* can't render on MicroPython (no PIL). Show the
@@ -232,7 +225,7 @@ class View:
         # cfg shaping. Imported lazily so Views never pull the native module into the
         # module-level import graph that must load on MicroPython.
         from seedsigner.gui.lvgl_screen_runner import run_lvgl_screen
-        return run_lvgl_screen(self.renderer, screen, attrs=kwargs)
+        return run_lvgl_screen(screen, attrs=kwargs)
 
 
     def run_button_list_screen(

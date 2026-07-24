@@ -194,7 +194,6 @@ class FlowTest(BaseTest):
             with patch("seedsigner.views.view.View.run_screen", autospec=True) as mock_run_screen, \
                  patch("seedsigner.views.view.View.run_qr_display_screen", autospec=True) as mock_run_qr_display_screen, \
                  patch("seedsigner.gui.lvgl_screen_runner.run_camera_scan") as mock_run_camera_scan, \
-                 patch("seedsigner.gui.lvgl_screen_runner.run_camera_preview_scan") as mock_run_camera_preview_scan, \
                  patch("seedsigner.gui.lvgl_screen_runner.run_seed_address_verification_screen") as mock_run_seed_address_verification, \
                  patch("seedsigner.gui.lvgl_screen_runner.run_io_test_screen") as mock_run_io_test_screen:
                 def run_view(destination: Destination, *args, **kwargs):
@@ -330,7 +329,6 @@ class FlowTest(BaseTest):
                         dropped_new=0,
                     )
                 mock_run_camera_scan.side_effect = native_scan_runner
-                mock_run_camera_preview_scan.side_effect = native_scan_runner
 
                 # SeedAddressVerificationView routes straight to the native runner (no
                 # View.run_screen hop). Its real brute-force worker thread drives verified_index;
