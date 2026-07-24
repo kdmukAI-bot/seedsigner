@@ -75,55 +75,6 @@ class ToolsImageEntropyLivePreviewView(View):
 
 
 
-# TODO: dead code — remove in the picamera sweep. The native camera_entropy overlay
-# (run_camera_entropy) presents the frozen final image as part of its capture -> review flow, so
-# this PIL final-image capture/review view is redundant. Pending on-device confirmation that the
-# LVGL screen presents the final image correctly, this view and its PIL capture path get deleted.
-class ToolsImageEntropyFinalImageView(View):
-    def run(self):
-        from PIL import Image
-        from PIL.ImageOps import autocontrast
-        from seedsigner.gui.components import resize_image_to_fill
-        from seedsigner.gui.screens.tools_screens import ToolsImageEntropyFinalImageScreen
-        if not self.controller.image_entropy_final_image:
-            from seedsigner.hardware.camera import Camera
-            # Take the final full-res image
-            camera = Camera.get_instance()
-            max_dim = max(self.canvas_width, self.canvas_height)
-
-            # Final image will be at least 4x the number of pixels the screen can
-            # actually display.
-            camera.start_single_frame_mode(resolution=(2*max_dim, 2*max_dim))
-
-            time.sleep(0.25)
-            self.controller.image_entropy_final_image = camera.capture_frame()
-            camera.stop_single_frame_mode()
-
-        # Prep a copy of the image for display:
-        #   * Boost the contrast for better presentation (but preserve the original pixels)
-        #   * Resize it to fit the screen
-        boosted_version = autocontrast(self.controller.image_entropy_final_image, cutoff=2)
-        display_version = resize_image_to_fill(
-            boosted_version,
-            target_size_x=self.canvas_width,
-            target_size_y=self.canvas_height,
-            sampling_method=Image.Resampling.BICUBIC,
-        )
-        
-        ret = self.run_screen(
-            ToolsImageEntropyFinalImageScreen,
-            final_image=display_version
-        )
-
-        if ret == RET_CODE__BACK_BUTTON:
-            # Go back to live preview and reshoot
-            self.controller.image_entropy_final_image = None
-            return Destination(BackStackView)
-        
-        return Destination(ToolsImageEntropyMnemonicLengthView)
-
-
-
 class ToolsImageEntropyMnemonicLengthView(View):
     TWELVE_WORDS = ButtonOption("12 words", return_data=12)
     TWENTYFOUR_WORDS = ButtonOption("24 words", return_data=24)

@@ -8,7 +8,7 @@ from base import FlowTest, FlowStep
 
 from seedsigner.models.settings import Settings
 from seedsigner.models.settings_definition import SettingsDefinition, SettingsConstants
-from seedsigner.gui.screens.screen import RET_CODE__BACK_BUTTON, ButtonOption
+from seedsigner.views.view import RET_CODE__BACK_BUTTON, ButtonOption
 from seedsigner.hardware.microsd import MicroSD
 from seedsigner.views.view import MainMenuView
 from seedsigner.views import scan_views, settings_views

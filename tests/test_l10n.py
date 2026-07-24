@@ -4,7 +4,7 @@ import pytest
 
 from base import BaseTest
 from langpack_catalog import packs_available
-from seedsigner.gui.screens.screen import ButtonOption
+from seedsigner.views.view import ButtonOption
 from seedsigner.helpers.l10n import mark_for_translation as _mft
 from seedsigner.models.settings import Settings
 from seedsigner.models.settings_definition import SettingsConstants

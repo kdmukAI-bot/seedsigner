@@ -2,7 +2,7 @@
 from base import FlowTest, FlowStep
 
 from seedsigner.controller import Controller
-from seedsigner.gui.screens.screen import RET_CODE__BACK_BUTTON, ButtonOption
+from seedsigner.views.view import RET_CODE__BACK_BUTTON, ButtonOption
 from seedsigner.models.seed import Seed
 from seedsigner.models.settings_definition import SettingsConstants, SettingsDefinition
 from seedsigner.views.view import ErrorView, MainMenuView

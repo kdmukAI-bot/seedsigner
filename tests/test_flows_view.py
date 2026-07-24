@@ -3,7 +3,7 @@ from unittest.mock import patch
 # Must import test base before the Controller
 from base import FlowTest, FlowStep
 
-from seedsigner.gui.screens.screen import RET_CODE__POWER_BUTTON
+from seedsigner.views.view import RET_CODE__POWER_BUTTON
 from seedsigner.models.settings import Settings
 from seedsigner.views.tools_views import ToolsCalcFinalWordNumWordsView, ToolsMenuView
 from seedsigner.views.view import MainMenuView, NotYetImplementedView, PowerOptionsView, PowerOffView, RestartView, UnhandledExceptionView, View

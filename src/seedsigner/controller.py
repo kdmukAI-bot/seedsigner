@@ -7,7 +7,7 @@ from seedsigner.models.settings import SettingsConstants
 from seedsigner.models.singleton import Singleton
 from seedsigner.models.threads import BaseThread
 from seedsigner.compat import IS_MICROPYTHON
-from seedsigner.views.view import Destination, Screensaver, View
+from seedsigner.views.view import Destination, View
 
 # embit and the PSBT/Seed model modules are deliberately NOT imported at module
 # level: on MicroPython every first-time module load pays ~60-130ms of VFS
@@ -58,7 +58,6 @@ class FlowBasedTestException(Exception):
 
 class BackgroundImportThread(BaseThread):
     def run(self):
-        # import seedsigner.hardware.buttons # slowly imports GPIO along the way
 
         def time_import(module_name):
             last = time.time()
@@ -139,8 +138,6 @@ class Controller(Singleton):
 
     multisig_wallet_descriptor: "Descriptor" = None
 
-    image_entropy_preview_frames = None
-    image_entropy_final_image = None
     # Native (ESP32 camera_entropy) result: the (chain, frame) bytes tuple from a capture, held
     # between the live-preview View and the mnemonic-length View. The native pipeline replaces the
     # PIL preview-frames + final-image pair above; see run_camera_entropy.
@@ -162,7 +159,6 @@ class Controller(Singleton):
     resume_main_flow: str = None
 
     back_stack: BackStack = None
-    screensaver: Screensaver = None
     toast_notification_thread = None
 
 
@@ -405,9 +401,6 @@ class Controller(Singleton):
                     logger.info(f"NOT appending {next_destination}")
 
         finally:
-            if self.is_screensaver_running:
-                self.screensaver.stop()
-
             if self.toast_notification_thread and self.toast_notification_thread.is_alive():
                 self.toast_notification_thread.stop()
 
@@ -417,44 +410,12 @@ class Controller(Singleton):
             clear_screen()
 
 
-    @property
-    def is_screensaver_running(self):
-        return self.screensaver is not None and self.screensaver.is_running
-
-
-    def start_screensaver(self):
-        # Toast/screensaver coexistence is now owned by the native LVGL overlay_manager (a
-        # toast suppresses screensaver activation while it shows, and a new toast breaks a
-        # running screensaver), so the Controller no longer hands the Renderer.lock back
-        # and forth between them.
-        logger.info("Controller: Starting screensaver")
-        if not self.screensaver:
-            self.screensaver = Screensaver()
-
-        # Start the screensaver, but it will block until it can acquire the Renderer.lock.
-        self.screensaver.start()
-        logger.info("Controller: Screensaver started")
-    
-
-    def reset_screensaver_timeout(self):
-        """
-        Reset the screensaver's timeout starting point to right now (i.e. make it think
-        that zero time has elapsed since the last user interaction).
-        """
-        from seedsigner.hardware.buttons import HardwareButtons
-        HardwareButtons.get_instance().update_last_input_time()
-
-
     def activate_toast(self, toast_manager_thread):
         """
-        Ensures that the Controller has explicit control over which processes get to
-        claim the Renderer.lock and which need to (potentially) release it.
+        Enforces one toast at a time: a new toast stops any toast currently showing
+        before starting. Screensaver/toast coexistence is owned by the native LVGL
+        overlay_manager, not the Controller.
         """
-        if self.is_screensaver_running:
-            # New toast notifications break out of the Screensaver
-            logger.info("Controller: stopping screensaver")
-            self.screensaver.stop()
-
         if self.toast_notification_thread and self.toast_notification_thread.is_alive():
             # Can only run one toast at a time
             logger.info(f"Controller: stopping {self.toast_notification_thread.__class__.__name__}")
@@ -512,13 +473,13 @@ class Controller(Singleton):
     @property
     def is_screensaver_start_allowed(self) -> bool:
         """
-            Determines whether the screensaver is allowed to start.
+            Whether the current active view allows the (native) screensaver to start.
 
-            The screensaver can start only if:
-            - It is not currently running.
-            - The current active view allows screensaver activity.
+            The native overlay_manager owns screensaver activation; this exposes the
+            per-view opt-out (a View sets ``is_screensaver_allowed = False``) as a
+            queryable policy.
         """
         from seedsigner.views import MainMenuView
         # Confusingly, the top item in the `BackStack` is actually the *current* View
         active_view = self.back_stack[-1].view if self.back_stack else MainMenuView()
-        return not self.is_screensaver_running and active_view.is_screensaver_allowed
+        return active_view.is_screensaver_allowed

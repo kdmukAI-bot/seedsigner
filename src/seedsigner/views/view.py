@@ -366,11 +366,9 @@ class View:
     def run_qr_display_screen(self, *, qr_encoder):
         """Display a static or animated QR via the native ``qr_display_screen`` frame driver
         (the animated UR-fountain case pushes frames + honors the brightness tip) on BOTH
-        platforms — the runner owns the per-platform pump mechanics. The PIL
-        ``QRDisplayScreen`` stays in-tree (upstream parity) but is unreachable on-device;
-        keeping the Pi native here keeps GPIO input on the native held-key gate instead of
-        the PIL screen's independent ``HardwareButtons`` reader. Callers ignore the return value and
-        route on their own fixed Destination."""
+        platforms — the runner owns the per-platform pump mechanics; GPIO input rides the
+        native held-key gate. Callers ignore the return value and route on their own fixed
+        Destination."""
         from seedsigner.gui.lvgl_screen_runner import run_qr_display_screen as _run_qr_display_screen
         return _run_qr_display_screen(qr_encoder)
 
@@ -782,32 +780,3 @@ class OpeningSplashView(View):
             allow_screensaver=False,
         )
 
-
-
-class Screensaver:
-    """
-    Lightweight, controller-driven manager for the screensaver. Not a View: it never goes
-    on the back stack and is driven directly via start()/stop()/is_running.
-
-    Holds a single persistent ScreensaverScreen instance so that a cross-thread stop()
-    (e.g. an SD-card toast interrupt) reaches the same instance the main thread is running.
-    """
-    def __init__(self):
-        self.screen = None
-
-    @property
-    def is_running(self) -> bool:
-        return self.screen is not None and self.screen.is_running
-
-    def start(self):
-        if self.screen is None:
-            # Lazy/late import + instantiation to reduce Controller initial startup time
-            # (and to keep this module PIL-free at import).
-            from seedsigner.gui.screens.screen import ScreensaverScreen
-            from seedsigner.hardware.buttons import HardwareButtons
-            self.screen = ScreensaverScreen(HardwareButtons.get_instance())
-        self.screen.start()
-
-    def stop(self):
-        if self.screen is not None:
-            self.screen.stop()
