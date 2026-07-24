@@ -4,7 +4,7 @@ import pytest
 from base import FlowTest, FlowStep, FlowTestMissingRedirectException, FlowTestUnexpectedRedirectException, FlowTestUnexpectedViewException, FlowTestInvalidButtonDataSelectionException, FlowTestInvalidButtonDataInstanceTypeException
 
 from seedsigner.controller import Controller
-from seedsigner.gui.screens.screen import RET_CODE__BACK_BUTTON, RET_CODE__POWER_BUTTON, ButtonListScreen, ButtonOption
+from seedsigner.views.view import RET_CODE__BACK_BUTTON, RET_CODE__POWER_BUTTON, ButtonOption
 from seedsigner.models.seed import Seed
 from seedsigner.views import scan_views
 from seedsigner.views.psbt_views import PSBTSelectSeedView
@@ -170,14 +170,14 @@ class TestFlowTest(FlowTest):
         class MyBadButtonDataTestView(View):
             def run(self):
                 self.run_screen(
-                    ButtonListScreen,
+                    "button_list_screen",
                     button_data=[ButtonOption("This is fine"), "This is not"]
                 )
 
         class MyGoodButtonDataTestView(View):
             def run(self):
                 self.run_screen(
-                    ButtonListScreen,
+                    "button_list_screen",
                     button_data=[ButtonOption("This is fine"), ButtonOption("This is also fine")]
                 )
                 return Destination(MainMenuView)

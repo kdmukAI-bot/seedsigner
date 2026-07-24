@@ -193,7 +193,7 @@ class TestLocaleSelectionView(BaseTest):
     def test_back_button_returns_to_settings_menu(self):
         from seedsigner.views import settings_views
         from seedsigner.views.view import View
-        from seedsigner.gui.screens.screen import RET_CODE__BACK_BUTTON
+        from seedsigner.views.view import RET_CODE__BACK_BUTTON
         from seedsigner.models.settings_definition import SettingsConstants
 
         before = self.settings.get_value(SettingsConstants.SETTING__LOCALE)

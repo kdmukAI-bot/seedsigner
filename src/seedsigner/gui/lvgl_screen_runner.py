@@ -544,9 +544,9 @@ def get_inactive_time_ms():
     native runtime is absent (dev/CI/host tests).
 
     Thin host wrapper over the native ``get_inactive_time_ms()``: any keypad press resets the
-    display's activity clock toward 0, so a small value means the user just interacted. This
-    is the native replacement for the ``HardwareButtons.has_any_input()`` poll behind the
-    toast pre-show activation-delay cancel. Presses only register while the runtime is pumped,
+    display's activity clock toward 0, so a small value means the user just interacted. It
+    backs the toast pre-show activation-delay cancel (a fresh press during the pre-show window
+    cancels the pending toast). Presses only register while the runtime is pumped,
     so the reading is meaningful only over a live native screen (whose runner pumps) — which
     is exactly the context a toast shows in.
     """

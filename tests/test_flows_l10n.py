@@ -6,7 +6,7 @@ import pytest
 from base import FlowTest, FlowStep
 
 from langpack_catalog import packs_available
-from seedsigner.gui.screens.screen import RET_CODE__BACK_BUTTON, ButtonOption
+from seedsigner.views.view import RET_CODE__BACK_BUTTON, ButtonOption
 from seedsigner.models.settings_definition import SettingsConstants, SettingsDefinition
 from seedsigner.views import settings_views
 from seedsigner.views.view import MainMenuView
