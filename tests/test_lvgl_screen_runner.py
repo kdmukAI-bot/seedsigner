@@ -1,10 +1,10 @@
 """Unit tests for the LVGL screen runner (`seedsigner.gui.lvgl_screen_runner`) and
 the `View.run_screen` dispatch seam.
 
-These tests drive the runner directly with a faked native module. They cover the
-CPython (blended-display) path; the MicroPython branch (`IS_MICROPYTHON`) skips the
-flush callback, the renderer lock, and the Python-side pump (the native task pumps
-LVGL), and is exercised on-device.
+These tests drive the runner directly with a faked native module. On both platforms
+the native module owns the display and pumps LVGL on a background task, so the runner
+only builds the screen and polls for the result — no flush callback, no renderer lock,
+no Python-side pump.
 
 The runner is the one place the LVGL JSON shape lives: `_assemble_cfg` turns flat
 view-layer attrs into the native cfg, and `_serialize_button_option` shapes one
@@ -18,7 +18,7 @@ sys.modules.setdefault("seedsigner.hardware.buttons", MagicMock())
 
 import seedsigner.gui.lvgl_screen_runner as lvgl_screen_runner
 from seedsigner.gui.lvgl_screen_runner import (
-    _make_flush_callback, _translate_event, _serialize_button_option, _lvgl_color,
+    _translate_event, _serialize_button_option, _lvgl_color,
     _assemble_cfg, QRBrightnessEvent,
 )
 from seedsigner.views.view import (
@@ -69,19 +69,7 @@ def test_qr_brightness_event_value_equality():
 
 
 # ---------------------------------------------------------------------------
-# _make_flush_callback - little-endian RGB565 -> big-endian, through the driver
-# ---------------------------------------------------------------------------
-
-def test_make_flush_callback_byteswaps_and_blits():
-    driver = MagicMock()
-    flush = _make_flush_callback(driver)
-    # Two LE RGB565 pixels: 0x1234, 0xABCD stored low-byte-first.
-    flush(0, 0, 1, 0, b"\x34\x12\xcd\xab")
-    driver.blit_rgb565.assert_called_once_with(0, 0, 1, 0, b"\x12\x34\xab\xcd")
-
-
-# ---------------------------------------------------------------------------
-# run_lvgl_screen - CPython happy path
+# run_lvgl_screen - build once, then poll
 # ---------------------------------------------------------------------------
 
 def test_run_lvgl_screen_returns_translated_result(monkeypatch):
@@ -90,14 +78,13 @@ def test_run_lvgl_screen_returns_translated_result(monkeypatch):
     monkeypatch.setattr(lvgl_screen_runner, "_lv", fake_lv)
     monkeypatch.setattr(lvgl_screen_runner, "ensure_lvgl_runtime", lambda: None)
 
-    renderer = MagicMock()
     # attrs=None -> a cfg-less screen, called with no positional arg.
-    result = lvgl_screen_runner.run_lvgl_screen(renderer, "main_menu_screen")
+    result = lvgl_screen_runner.run_lvgl_screen("main_menu_screen")
 
     assert result == 2
-    # Blended-display path: flush callback set around the render, then cleared.
-    assert fake_lv.set_flush_mode.called
-    fake_lv.set_flush_callback.assert_called_with(None)  # last call clears it
+    # The native pump task owns the display: no flush callback, no Python-side pump.
+    assert not fake_lv.set_flush_callback.called
+    assert not fake_lv.lvgl_pump.called
     fake_lv.main_menu_screen.assert_called_once_with()
 
 
@@ -111,7 +98,7 @@ def test_run_lvgl_screen_assembles_cfg_and_stamps_screensaver(monkeypatch):
 
     attrs = {"initial_text": "", "allow_screensaver": False}
     result = lvgl_screen_runner.run_lvgl_screen(
-        renderer=MagicMock(), screen="seed_add_passphrase_screen", attrs=attrs)
+        "seed_add_passphrase_screen", attrs=attrs)
 
     assert result == "abc"
     fake_lv.seed_add_passphrase_screen.assert_called_once_with(
@@ -119,24 +106,25 @@ def test_run_lvgl_screen_assembles_cfg_and_stamps_screensaver(monkeypatch):
     assert attrs == {"initial_text": "", "allow_screensaver": False}  # not mutated
 
 
-def test_run_lvgl_screen_builds_once_then_pumps_for_result(monkeypatch):
+def test_run_lvgl_screen_builds_once_then_polls_for_result(monkeypatch):
     """The native screen fn is a pure builder: the runner builds it exactly once (with
-    NO wait_timeout_ms kwarg), then pumps LVGL and polls until a result appears. The
-    native overlay manager owns the screensaver, so there is no Python-side save/restore."""
+    NO wait_timeout_ms kwarg), then polls until a result appears. The native pump task
+    owns the display + screensaver, so there is no Python-side pump or save/restore."""
     fake_lv = MagicMock()
     fake_lv.poll_for_result.side_effect = [
-        None,                                # first poll: nothing yet -> pump again
+        None,                                # first poll: nothing yet -> poll again
         ("button_selected", 3, "Settings"),  # second poll: a selection
     ]
     monkeypatch.setattr(lvgl_screen_runner, "_lv", fake_lv)
     monkeypatch.setattr(lvgl_screen_runner, "ensure_lvgl_runtime", lambda: None)
-    monkeypatch.setattr("time.sleep", lambda *a: None)
+    monkeypatch.setattr(lvgl_screen_runner, "_sleep_ms", lambda *a: None)
 
-    result = lvgl_screen_runner.run_lvgl_screen(MagicMock(), "main_menu_screen")
+    result = lvgl_screen_runner.run_lvgl_screen("main_menu_screen")
 
     assert result == 3
     fake_lv.main_menu_screen.assert_called_once_with()
-    assert fake_lv.lvgl_pump.called  # pumped until the result appeared
+    assert fake_lv.poll_for_result.call_count == 2  # polled until the result appeared
+    assert not fake_lv.lvgl_pump.called             # native task pumps, not the runner
     fake_lv.save_screen.assert_not_called()
     fake_lv.restore_screen.assert_not_called()
 
@@ -164,21 +152,19 @@ def test_run_screen_class_takes_pil_path():
 def test_run_screen_str_forwards_kwargs_as_attrs(monkeypatch):
     captured = {}
 
-    def fake_run_lvgl(renderer, screen, *, attrs=None):
-        captured.update(renderer=renderer, screen=screen, attrs=attrs)
+    def fake_run_lvgl(screen, *, attrs=None):
+        captured.update(screen=screen, attrs=attrs)
         return 3
 
     monkeypatch.setattr(
         "seedsigner.gui.lvgl_screen_runner.run_lvgl_screen", fake_run_lvgl)
 
     view = View.__new__(View)
-    view.renderer = object()
     result = view.run_screen("main_menu_screen", title="Home", allow_screensaver=False)
 
     assert result == 3
     assert captured["screen"] == "main_menu_screen"
     assert captured["attrs"] == {"title": "Home", "allow_screensaver": False}
-    assert captured["renderer"] is view.renderer
 
 
 # ---------------------------------------------------------------------------
@@ -313,13 +299,11 @@ def test_assemble_cfg_custom_status_forwards_hero_icon_and_color():
 
 
 # ---------------------------------------------------------------------------
-# _make_scan_should_continue - per-tick pump + cancel drain
+# _make_scan_should_continue - cancel drain
 # ---------------------------------------------------------------------------
-# The scan drive loop is shared by both platforms, so the pump has to be built in
-# per-platform: the Pi has no native display task, and pumping is what drives the
-# render/flush, camera_engine_pump_consume() (frames -> preview sink), and LVGL's
-# input read. On MicroPython the firmware display task owns all three, so pumping
-# from Python here would drive LVGL from two threads.
+# The native pump task owns the display + input read on both platforms, so the
+# should_continue callable only drains the UI event queue: empty -> keep scanning,
+# a button event -> cancel.
 
 def _fake_lv_for_scan(monkeypatch, events):
     lv = MagicMock()
@@ -328,20 +312,8 @@ def _fake_lv_for_scan(monkeypatch, events):
     return lv
 
 
-def test_scan_should_continue_pumps_under_the_renderer_lock_on_cpython(monkeypatch):
-    lv = _fake_lv_for_scan(monkeypatch, [None])
-    renderer = MagicMock()
-
-    should_continue = lvgl_screen_runner._make_scan_should_continue(renderer)
-
-    assert should_continue() is True
-    lv.lvgl_pump.assert_called_once_with(5, 1)
-    renderer.lock.__enter__.assert_called_once()
-    renderer.lock.__exit__.assert_called_once()
-
-
-def test_scan_should_continue_does_not_pump_on_micropython(monkeypatch):
-    """No renderer -> MicroPython, where the native display task pumps LVGL itself."""
+def test_scan_should_continue_does_not_pump(monkeypatch):
+    """The native pump task advances LVGL; the drain never pumps from Python."""
     lv = _fake_lv_for_scan(monkeypatch, [None])
 
     should_continue = lvgl_screen_runner._make_scan_should_continue()
@@ -353,7 +325,7 @@ def test_scan_should_continue_does_not_pump_on_micropython(monkeypatch):
 def test_scan_should_continue_cancels_on_a_button_event(monkeypatch):
     _fake_lv_for_scan(monkeypatch, [("button_selected", RET_CODE__BACK_BUTTON, None)])
 
-    assert lvgl_screen_runner._make_scan_should_continue(MagicMock())() is False
+    assert lvgl_screen_runner._make_scan_should_continue()() is False
 
 
 def test_scan_should_continue_drains_the_queue_fully_each_tick(monkeypatch):
@@ -361,5 +333,5 @@ def test_scan_should_continue_drains_the_queue_fully_each_tick(monkeypatch):
     can't leave an unread cancel sitting behind it."""
     lv = _fake_lv_for_scan(monkeypatch, [("text_entered", 0, "x"), None])
 
-    assert lvgl_screen_runner._make_scan_should_continue(MagicMock())() is True
+    assert lvgl_screen_runner._make_scan_should_continue()() is True
     assert lv.poll_for_result.call_count == 2

@@ -8,20 +8,11 @@ identified by name — never by importing the native module into a View — so t
 business logic stays free of any ``seedsigner_lvgl_screens`` dependency and the
 flow-test harness (which patches ``run_screen``) never touches the native path.
 
-Two render models, one runner:
-
-  * CPython / Pi Zero — "blended display": LVGL renders through SeedSigner's
-    existing ST7789 SPI driver via a Python flush callback, sharing the panel
-    with the PIL screens. ``Renderer.lock`` is held around the render so PIL and
-    LVGL never write concurrently. Nothing pumps LVGL in the background, so this
-    runner pumps it itself between polls.
-  * MicroPython / ESP32 — the native module owns the display and pumps LVGL on a
-    separate task, so there is no Python flush callback and no Python-side pump;
-    the ``not IS_MICROPYTHON`` guards skip that setup and this runner only polls.
-
-Both platforms follow one contract: the native screen function is a pure builder
-(it builds the widget tree and returns immediately) and a Python loop polls for the
-result.
+One render model on both platforms: the native module owns the display and pumps
+LVGL on a background task (the ESP32 firmware's display task; the Pi's native pump
+thread), so there is no Python flush callback and no Python-side pump. The native
+screen function is a pure builder (it builds the widget tree and returns immediately)
+and a Python loop polls for the result.
 
 Screensaver: the native overlay manager owns the idle screensaver on both
 platforms. A C dispatcher watches the LVGL inactivity timer and swaps to / restores
@@ -31,14 +22,12 @@ Per-screen opt-out rides in the cfg as ``allow_screensaver``: a View sets it Fal
 for screens that must stay up (e.g. camera scanning), the shared parser defaults it
 true, and the native scaffold stamps the screen object so the dispatcher skips it.
 """
-import array
 import gc
 import logging
 
 from seedsigner.compat import IS_MICROPYTHON
 from seedsigner.compat.threading import Lock
 from seedsigner.compat.time import sleep_ms as _sleep_ms
-from seedsigner.models.threads import BaseThread
 from seedsigner.views.view import RET_CODE__BACK_BUTTON, RET_CODE__POWER_BUTTON
 
 logger = logging.getLogger(__name__)
@@ -53,10 +42,6 @@ _screensaver_timeout_ms = 0
 # the BackgroundImportThread and by the main thread (the first screen render),
 # and the native init must not run twice.
 _init_lock = Lock()
-
-# Handle to the CPython loading-screen pump thread (None when idle).
-# TRANSITIONAL — delete at the Pi native display-pump cutover (see run_loading_screen).
-_loading_pump = None
 
 
 def ensure_lvgl_runtime():
@@ -139,17 +124,6 @@ def ensure_lvgl_runtime():
 
     logger.info("LVGL runtime initialized (screensaver timeout=%dms)",
                 _screensaver_timeout_ms)
-
-
-def _make_flush_callback(display_driver):
-    """Return a flush callback that writes LVGL RGB565 pixels through an existing
-    SeedSigner display driver instance (CPython / blended-display only)."""
-    def _flush(x1, y1, x2, y2, buf):
-        # LVGL outputs little-endian RGB565; ST7789 expects big-endian.
-        arr = array.array("H", buf)
-        arr.byteswap()
-        display_driver.blit_rgb565(x1, y1, x2, y2, arr.tobytes())
-    return _flush
 
 
 class QRBrightnessEvent:
@@ -587,11 +561,10 @@ def get_inactive_time_ms():
         return None
 
 
-def run_lvgl_screen(renderer, screen, *, attrs=None):
-    """Run an LVGL screen while holding the renderer lock; return its result.
+def run_lvgl_screen(screen, *, attrs=None):
+    """Run an LVGL screen and return its result.
 
     Args:
-        renderer: The SeedSigner Renderer singleton.
         screen: The native screen-function *name* (e.g. "main_menu_screen"). A
             string is resolved against the native module after init — passing the
             name rather than ``_lv.<fn>`` avoids dereferencing ``_lv`` before the
@@ -613,103 +586,31 @@ def run_lvgl_screen(renderer, screen, *, attrs=None):
     cfg = _assemble_cfg(attrs) if attrs is not None else None
     args = (cfg,) if cfg is not None else ()
 
-    # One contract, two mechanics. On both platforms the native screen fn is a pure
-    # builder — it builds the widget tree and returns immediately — and a Python loop
-    # polls for the result; the native overlay manager owns the screensaver. The
-    # branches differ only in how LVGL gets pumped, not in architecture: MicroPython's
-    # native task pumps LVGL and owns the display, so Python only polls; CPython still
-    # shares the panel with the legacy PIL pipeline (the blended display), so this
-    # runner pumps LVGL itself under renderer.lock and routes frames through the PIL
-    # driver's flush callback. That blended-display coupling is the last transitional
-    # difference — at the PIL-screen cutover the Pi native layer will own the display
-    # and pump in the background like the ESP32 task already does, and the two branches
-    # become one.
-    if IS_MICROPYTHON:
-        # The native LVGL loop (a separate task) processes input asynchronously and
-        # queues results; poll until one appears. The native module owns display,
-        # input, the pump, and its own idle screensaver, so none of the CPython
-        # blended-display machinery below (flush callback, renderer.lock, Python-side
-        # pump) applies here.
-        _lv.clear_result_queue()
-        screen_fn(*args)
-        while True:
-            event = _lv.poll_for_result()
-            if event is not None:
-                return _translate_event(event)
-            _sleep_ms(20)
-
-    # CPython / Pi Zero blended display. Build the screen once, then pump LVGL and
-    # poll in a loop, holding renderer.lock around each pump so PIL and LVGL never
-    # write the panel concurrently. The native overlay dispatcher fires inside the
-    # pump (lv_timer_handler), so the screensaver activates/restores on its own with
-    # nothing to do here. Releasing the lock and sleeping briefly between pumps hands
-    # the GIL back to background threads (the PIL-era cooperative model).
-    import time
-    try:
-        with renderer.lock:
-            # Blended display: route LVGL pixels through the PIL driver.
-            _lv.set_flush_mode("python")
-            _lv.set_flush_callback(_make_flush_callback(renderer.disp))
-            _lv.clear_result_queue()
-            screen_fn(*args)
-        while True:
-            with renderer.lock:
-                _lv.lvgl_pump(5, 1)
-                event = _lv.poll_for_result()
-            if event is not None:
-                # Reset the PIL-side input timer so returning to a PIL screen
-                # doesn't immediately re-trigger the PIL screensaver.
-                from seedsigner.hardware.buttons import HardwareButtons
-                HardwareButtons.get_instance().update_last_input_time()
-                return _translate_event(event)
-            time.sleep(0.005)
-    finally:
-        _lv.set_flush_callback(None)
-
-
-class _LoadingPumpThread(BaseThread):
-    """CPython-only: pump LVGL under renderer.lock so the self-animating loading spinner
-    keeps advancing while the main thread blocks in a long task.
-
-    Deliberately does NOT poll_for_result — a loading screen has no terminal event, so
-    the pump can never steal the next screen's result off the queue. TRANSITIONAL:
-    deleted at the Pi native display-pump cutover (see run_loading_screen)."""
-    def __init__(self, renderer):
-        super().__init__()
-        self.renderer = renderer
-
-    def run(self):
-        import time
-        while self.keep_running:
-            with self.renderer.lock:
-                _lv.lvgl_pump(5, 1)
-            time.sleep(0.02)
+    # The native screen fn is a pure builder — it builds the widget tree and returns
+    # immediately — and the native pump task owns the display, processes input, and
+    # runs the idle screensaver; this loop only builds once and polls for the result.
+    _lv.clear_result_queue()
+    screen_fn(*args)
+    while True:
+        event = _lv.poll_for_result()
+        if event is not None:
+            return _translate_event(event)
+        _sleep_ms(20)
 
 
 def run_loading_screen(text=None):
     """Show the native self-animating loading spinner (fire-and-forget).
 
     Unlike ``run_lvgl_screen``, the loading screen produces no terminal event and is NOT
-    polled: it is a pure builder that returns immediately. Dismiss it simply by loading
-    the next screen — ``View.run_screen`` calls ``stop_loading_pump`` at its dispatch seam
-    and the next build tears the spinner down (its ``LV_EVENT_DELETE`` frees the timer).
-    There is no ``stop()`` at the call site.
-
-      * MicroPython/ESP32: the native display task pumps LVGL, so the spinner animates on
-        its own while the VM thread blocks. Nothing else to do.
-      * CPython/Pi Zero (blended display): LVGL only advances on host ``lvgl_pump``, so we
-        paint one frame and start a background pump thread to keep it animating.
-        TRANSITIONAL — at the Pi native display-pump cutover the native layer pumps in the
-        background like the ESP32 task already does; then this whole CPython branch, the
-        ``_LoadingPumpThread``, and ``stop_loading_pump`` (plus its ``run_screen`` seam
-        call) are deleted and this collapses to the bare ``_lv.loading_spinner_screen(cfg)`` build.
+    polled: it is a pure builder that returns immediately. The native pump task animates
+    the spinner on its own while the calling thread blocks in a long task; dismiss it
+    simply by loading the next screen (its ``LV_EVENT_DELETE`` frees the timer). There is
+    no ``stop()`` at the call site.
 
     Degrades to a no-op when the native runtime is absent (dev/CI, ``ImportError``) or when
     the deployed firmware/.so predates the ``loading_spinner_screen`` binding, so the app change is
     safe against whatever binary is currently on-device.
     """
-    global _loading_pump
-    stop_loading_pump()  # never stack two spinners / two pumps
     try:
         ensure_lvgl_runtime()
     except ImportError:
@@ -717,104 +618,36 @@ def run_loading_screen(text=None):
     if not hasattr(_lv, "loading_spinner_screen"):
         return  # deployed firmware/.so predates the binding
     cfg = {"text": text} if text else None
-    if IS_MICROPYTHON:
-        _lv.clear_result_queue()
-        _lv.loading_spinner_screen(cfg)
-        return
-
-    # CPython blended display: build + paint one frame, then keep it animating via the pump
-    # thread. Mirrors run_lvgl_screen's flush setup; the flush callback stays installed for
-    # the pump's lifetime and is dropped by stop_loading_pump.
-    from seedsigner.gui.renderer import Renderer
-    renderer = Renderer.get_instance()
-    with renderer.lock:
-        _lv.set_flush_mode("python")
-        _lv.set_flush_callback(_make_flush_callback(renderer.disp))
-        _lv.clear_result_queue()
-        _lv.loading_spinner_screen(cfg)
-        _lv.lvgl_pump(5, 1)  # paint the first frame before we return
-    _loading_pump = _LoadingPumpThread(renderer)
-    _loading_pump.start()
-
-
-def stop_loading_pump():
-    """Stop the CPython loading-screen pump thread (if any) and drop its flush callback so
-    the following screen takes the panel cleanly. No-op on MicroPython / when idle.
-
-    Called at the ``View.run_screen`` dispatch seam — the one choke point every successor
-    screen (PIL or LVGL) passes through. TRANSITIONAL: deleted at the Pi native
-    display-pump cutover (see run_loading_screen)."""
-    global _loading_pump
-    if _loading_pump is None:
-        return
-    import time
-    pump, _loading_pump = _loading_pump, None
-    pump.stop()
-    # Bounded wait for the pump to finish its current iteration (no join(); matches the
-    # compat.threading idiom) so it can't flush a stale frame over the next screen.
-    for _ in range(20):
-        if not pump.is_alive():
-            break
-        time.sleep(0.005)
-    if _lv is not None:
-        _lv.set_flush_callback(None)
+    _lv.clear_result_queue()
+    _lv.loading_spinner_screen(cfg)
 
 
 def clear_screen():
     """Blank the display to black — the app's parting frame on exit.
 
-    Loads an all-black LVGL screen and pumps it to the panel via the native clear_screen
-    binding (raspi py_clear_screen -> lvgl_clear_to_black). A no-op when the native runtime
-    is absent (dev/CI, ImportError) or the deployed .so/firmware predates the clear_screen
-    binding, so it is safe against whatever binary is on-device.
-
-      * CPython/Pi Zero (blended display): the native pump only reaches the ST7789 through
-        the PIL driver's flush callback, so install it under renderer.lock the same way
-        run_lvgl_screen does; clear_screen pumps the black frame out before returning, then
-        drop the callback. TRANSITIONAL — collapses to a bare _lv.clear_screen() at the Pi
-        native display-pump cutover.
-      * MicroPython/ESP32: the native display task owns the panel, so a direct call is all
-        that's needed. The ESP32 firmware does not bind clear_screen yet, so the hasattr
-        guard keeps this a no-op there for now (matching the prior no-blank-on-exit behavior).
+    Loads an all-black LVGL screen and pushes it to the panel via the native clear_screen
+    binding (raspi py_clear_screen -> lvgl_clear_to_black); the native pump task owns the
+    display on both platforms. A no-op when the native runtime is absent (dev/CI,
+    ImportError) or the deployed .so/firmware predates the clear_screen binding (the ESP32
+    firmware does not bind it yet), so it is safe against whatever binary is on-device.
     """
-    # A parting loading spinner would otherwise keep its pump thread flushing over our
-    # black frame; stop it first (idempotent, no-op when idle) so the panel is ours.
-    stop_loading_pump()
     try:
         ensure_lvgl_runtime()
     except ImportError:
         return  # native module absent (dev/CI)
     if not hasattr(_lv, "clear_screen"):
         return  # deployed .so/firmware predates the binding
-    if IS_MICROPYTHON:
-        _lv.clear_screen()
-        return
-
-    # CPython blended display: route the native black frame through the PIL driver.
-    from seedsigner.gui.renderer import Renderer
-    renderer = Renderer.get_instance()
-    with renderer.lock:
-        _lv.set_flush_mode("python")
-        _lv.set_flush_callback(_make_flush_callback(renderer.disp))
-        _lv.clear_screen()  # loads black + pumps it out to the panel
-        _lv.set_flush_callback(None)
+    _lv.clear_screen()
 
 
-def _make_scan_should_continue(renderer=None):
+def _make_scan_should_continue():
     """Build the ``should_continue`` callable that ends a scan on user cancel.
 
-    During a scan the native camera overlay's back button is the only producer
-    feeding the shared UI event queue, so any event drained here (the overlay's back
-    button, surfaced as a button_selected carrying the RET_CODE__BACK_BUTTON sentinel)
-    means the user backed out. Returns False to cancel, mirroring the Pi Zero KEY_LEFT
-    semantics.
-
-    The hardware/joystick back source converges on this same signal once the native
-    scan path reaches a device with physical buttons (the Pi at the PIL cutover);
-    today this path is ESP32/touch-only, so only the touch queue feeds it.
-
-    ``renderer`` is the CPython blended-display renderer, or None on MicroPython. When
-    supplied, each tick also pumps LVGL under its lock — see should_continue below.
+    During a scan the native camera overlay's back button (and, on hardware, the
+    joystick back/LEFT press) is the only producer feeding the shared UI event queue,
+    so any event drained here — surfaced as a button_selected carrying the
+    RET_CODE__BACK_BUTTON sentinel — means the user backed out. Returns False to cancel.
+    The native pump task renders and reads input on its own, so this only drains.
     """
     def drain():
         # Drain the UI event queue fully each tick: empty -> keep scanning; a
@@ -827,24 +660,7 @@ def _make_scan_should_continue(renderer=None):
                 return True
             if event[0] == "button_selected":
                 return False
-
-    if renderer is None:
-        # MicroPython: the firmware's display task renders and reads input on its own,
-        # so Python must not pump LVGL here — it would drive LVGL from two threads.
-        return drain
-
-    def should_continue():
-        # The Pi has no native display task (RASPI-5), so LVGL only advances when we pump
-        # it. Three things ride on this, which is why skipping it froze the whole scan
-        # rather than just staling the screen: the render/flush, camera_engine_pump_consume()
-        # (the hook that moves captured frames into the preview sink, so without it the
-        # preview stays blank however well the camera runs), and LVGL's input read, so the
-        # back button never registers. Pump before draining, so events this tick produces
-        # are seen by the drain rather than a tick late.
-        with renderer.lock:
-            _lv.lvgl_pump(5, 1)
-            return drain()
-    return should_continue
+    return drain
 
 
 def run_camera_scan(decoder, *, instructions_text=None):
@@ -901,23 +717,8 @@ def run_camera_scan(decoder, *, instructions_text=None):
     # does). lvgl-screens to-do: stamp that flag on the camera preview overlay (and the
     # camera_entropy twin). Once the native screen owns it, drop this override and the
     # outer try/finally that exists only to restore the timeout.
-    # On the Pi, LVGL pixels reach the panel only through the PIL driver's flush callback,
-    # and LVGL only advances when Python pumps it (both done in should_continue's tick).
-    # Install the callback for the scan's duration exactly as every other CPython flow
-    # does — each drops it again on the way out, so by the time we get here there is none
-    # installed and an unpumped/unflushed scan renders nothing. MicroPython's firmware
-    # display task owns rendering, so it neither installs a callback nor pumps.
-    renderer = None
-    if not IS_MICROPYTHON:
-        from seedsigner.gui.renderer import Renderer
-        renderer = Renderer.get_instance()
-
     _lv.set_screensaver_timeout(0)
     try:
-        if renderer is not None:
-            with renderer.lock:
-                _lv.set_flush_mode("python")
-                _lv.set_flush_callback(_make_flush_callback(renderer.disp))
         try:
             camera_scanner.start(instructions_text=instructions_text)
         except OSError as e:
@@ -934,242 +735,12 @@ def run_camera_scan(decoder, *, instructions_text=None):
             _lv.clear_result_queue()
             return run_scan(
                 decoder, scanner=camera_scanner,
-                should_continue=_make_scan_should_continue(renderer),
+                should_continue=_make_scan_should_continue(),
             )
         finally:
             camera_scanner.stop()
     finally:
-        if renderer is not None:
-            _lv.set_flush_callback(None)
         _lv.set_screensaver_timeout(_screensaver_timeout_ms)
-
-
-def _numpy_rgb_to_rgb565(frame, rotation):
-    """Convert one picamera numpy frame to a 240x240 LVGL-native RGB565 byte string.
-
-    ``frame`` is HxWx3 uint8 RGB straight from ``Camera.read_video_stream()`` (the same
-    array fed to ``DecodeQR.add_image`` — decode gets the full-res original; this only
-    touches a downscaled copy for the *preview*). Pipeline mirrors the PIL preview's
-    geometry: stride-2 nearest downscale 480->240 (square, so fill == plain 2x), then a
-    ``90 + camera_rotation`` degree CCW rotation (``Image.rotate`` parity via ``np.rot90``).
-
-    Output is little-endian RGB565, w*h*2 bytes, NEVER pre-swapped for the panel — the
-    Stage-1 contract locked on-hardware. The active flush driver (python flush ->
-    ST7789.py, native flush -> display_st7789.cpp) owns panel byte-order/BGR, so feeding
-    LVGL-native keeps this flush-mode-agnostic (survives the display-driver cutover)."""
-    import numpy as np
-
-    # Stride-2 nearest downscale (480x480 -> 240x240). Both are square, so the PIL
-    # path's resize_image_to_fill is a plain 2x decimation with no aspect crop.
-    small = frame[::2, ::2]
-    # 90 + camera_rotation degrees CCW; camera_rotation is always a multiple of 90.
-    k = ((90 + int(rotation)) // 90) % 4
-    if k:
-        small = np.rot90(small, k)
-    r = (small[:, :, 0].astype(np.uint16) & 0xF8) << 8   # RRRRR000 -> bits 15..11
-    g = (small[:, :, 1].astype(np.uint16) & 0xFC) << 3   # GGGGGG00 -> bits 10..5
-    b = (small[:, :, 2].astype(np.uint16) >> 3)          # BBBBB    -> bits 4..0
-    rgb565 = r | g | b
-    # ascontiguousarray: np.rot90 returns a non-contiguous view; tobytes() copies in C
-    # order regardless, but be explicit. Native (little-endian on the ARM Pi) byte order
-    # is exactly the LVGL-native RGB565 the sink expects.
-    return np.ascontiguousarray(rgb565).tobytes()
-
-
-class _CameraScanDecodeThread(BaseThread):
-    """Camera-scan decode worker: runs ``DecodeQR.add_image()`` on a dedicated thread.
-
-    Decode is the heavy, variable-latency step — the zbar scan runs ~100-200 ms and jitters with
-    frame content. Running it on its own thread lets the preview loop push frames and pump LVGL
-    at a steady, camera-rate cadence independent of decode time, and keeps every native-LVGL call
-    on a single thread: this worker touches only ``decoder`` (pyzbar + the UR assembler), never
-    LVGL. pyzbar reaches libzbar through ctypes, which releases the GIL for the scan, so on the
-    single-core Pi the preview loop keeps running while a decode is in flight.
-
-    Cross-thread state is plain scalars (single reads/writes are GIL-atomic). The main thread
-    only READS ``percent`` / ``status`` / ``done`` / ``complete``; this worker is the sole caller
-    of ``decoder`` methods, so ``DecodeQR`` is never accessed concurrently. The main thread reads
-    the decoder object itself only after this worker has stopped (the runner's ``finally`` waits
-    for it)."""
-    def __init__(self, camera, decoder):
-        super().__init__()
-        self.camera = camera
-        self.decoder = decoder
-        self.status = None        # last DecodeQRStatus -> drives the overlay dot
-        self.percent = 0          # monotonic-clamped scan progress -> drives the bar
-        self.complete = False     # a COMPLETE (not INVALID) decode was reached
-        self.done = False         # terminal (COMPLETE or INVALID) -> main loop exits
-        self._max_pct = 0
-
-    def run(self):
-        import time
-        from seedsigner.models.decode_qr import DecodeQRStatus
-        while self.keep_running:
-            frame = self.camera.read_video_stream()
-            if frame is None:
-                time.sleep(0.005)
-                continue
-            status = self.decoder.add_image(frame)
-            # Monotonic progress: the weighted estimate can momentarily dip, so never lower it.
-            try:
-                pct = self.decoder.get_percent_complete(weight_mixed_frames=True)
-            except Exception:
-                pct = self._max_pct
-            if pct < self._max_pct:
-                pct = self._max_pct
-            else:
-                self._max_pct = pct
-            self.percent = pct
-            self.status = status
-            if status in (DecodeQRStatus.COMPLETE, DecodeQRStatus.INVALID):
-                # Either terminal state ends the scan; the caller routes COMPLETE vs INVALID
-                # off the decoder object.
-                self.complete = status == DecodeQRStatus.COMPLETE
-                self.done = True
-                return
-
-
-def run_camera_preview_scan(decoder, *, instructions_text=None, allow_screensaver=False):
-    """Drive the Pi Zero LVGL camera-preview scan for a ScanView.
-
-    The Pi captures frames with picamera and decodes them with ``DecodeQR``; the live preview +
-    QR-scan overlay render through the native ``camera_preview_screen`` pixel sink. Two threads:
-    a background ``_CameraScanDecodeThread`` runs the QR decode, and this main loop renders the
-    preview (numpy -> RGB565 -> ``set_frame``) + overlay progress and pumps LVGL under
-    ``renderer.lock`` at a steady ~camera-rate cadence. The per-frame sleep up to
-    ``PREVIEW_INTERVAL`` yields the single core to the decode thread.
-
-    Cancel is joystick LEFT / RIGHT via ``HardwareButtons``: the overlay is passive chrome (in
-    hardware mode it shows a "< back" instruction line, per camera_preview_overlay.h), so the
-    host owns the back affordance; nothing on the LVGL side emits a back event.
-
-    Returns a ``ScanResult`` (the caller reads ``decoder`` + ``result.cancelled`` to route), or
-    ``None`` if the camera fails to start so the caller can recover to a notice."""
-    ensure_lvgl_runtime()
-    # A fire-and-forget loading spinner (e.g. from the launching view) leaves a pump thread
-    # running; stop it so it can't pump LVGL concurrently with this scan's pump (they'd fight
-    # over the active screen). No-op if idle.
-    stop_loading_pump()
-    import time
-    from seedsigner.gui.renderer import Renderer
-    from seedsigner.hardware.buttons import HardwareButtons, HardwareButtonsConstants
-    from seedsigner.hardware.camera import Camera, CameraConnectionError
-    from seedsigner.hardware.scan_consumer import ScanResult
-    from seedsigner.models.decode_qr import DecodeQRStatus
-
-    # DecodeQRStatus -> overlay frame_status per camera_preview_set_progress's contract.
-    _FRAME_STATUS = {
-        DecodeQRStatus.PART_COMPLETE: 1,   # new part -> green dot
-        DecodeQRStatus.PART_EXISTING: 2,   # already seen -> gray dot
-        DecodeQRStatus.FALSE: 3,           # nothing decoded -> dot hidden
-    }
-
-    renderer = Renderer.get_instance()
-    hw = HardwareButtons.get_instance()
-    camera = Camera.get_instance()
-
-    # 480x480 @ ~6fps RGB — the capture profile decode reliability is tuned for.
-    # read_video_stream() returns the raw numpy frame the decoder expects.
-    try:
-        camera.start_video_stream_mode(resolution=(480, 480), framerate=6, format="rgb")
-    except CameraConnectionError as e:
-        logger.error("camera start failed for LVGL scan: %r", e)
-        return None
-
-    # Steady preview-cadence target (~camera rate). The per-frame sleep up to this interval is
-    # what hands the single core to the decode thread: too short starves decode, too long makes
-    # the preview lag the camera.
-    PREVIEW_INTERVAL = 0.15
-
-    cancelled = False
-    complete = False
-    decode_thread = None
-    try:
-        # A live preview isn't LVGL "input activity", so suspend the idle screensaver for the
-        # scan (0 disables; runtime-updatable), then restore in finally. The screen also carries
-        # SS_OBJ_FLAG_NO_SCREENSAVER, and camera_preview_close() resets the idle clock so the next
-        # screen still gets a full saver window. Inside the try so the camera-stop finally always
-        # runs once the camera has started.
-        if not allow_screensaver:
-            _lv.set_screensaver_timeout(0)
-
-        # Build the preview screen + install the flush callback under the lock, then paint the
-        # first frame (black sink + instruction overlay).
-        with renderer.lock:
-            _lv.set_flush_mode("python")
-            _lv.set_flush_callback(_make_flush_callback(renderer.disp))
-            _lv.clear_result_queue()
-            cfg = {"allow_screensaver": allow_screensaver}
-            if instructions_text:
-                cfg["instructions_text"] = instructions_text
-            _lv.camera_preview_screen(cfg)
-            _lv.lvgl_pump(5, 1)
-
-        # Decode runs on the worker thread; this loop renders the preview, pumps LVGL, reads cancel.
-        decode_thread = _CameraScanDecodeThread(camera, decoder)
-        decode_thread.start()
-
-        while not decode_thread.done:
-            t_start = time.monotonic()
-
-            # Cancel: joystick LEFT / RIGHT (the host-wired back affordance).
-            if hw.check_for_low(keys=[HardwareButtonsConstants.KEY_LEFT,
-                                      HardwareButtonsConstants.KEY_RIGHT]):
-                cancelled = True
-                break
-
-            frame = camera.read_video_stream()
-            if frame is not None:
-                # Snapshot the decode thread's latest progress (plain scalar reads).
-                pct = decode_thread.percent
-                fs = _FRAME_STATUS.get(decode_thread.status, 0)
-                rgb565 = _numpy_rgb_to_rgb565(frame, camera._camera_rotation)
-                with renderer.lock:
-                    _lv.camera_preview_set_frame(rgb565)
-                    # Keep the instruction line until there's real progress; once decoding,
-                    # set_progress raises the bar + status dot (and implies scanning).
-                    if pct > 0:
-                        _lv.camera_preview_set_progress(pct, fs)
-                    _lv.lvgl_pump(5, 1)
-            else:
-                # Camera still warming up: keep the overlay animating, don't render a None frame.
-                with renderer.lock:
-                    _lv.lvgl_pump(5, 1)
-
-            if camera._video_stream is None:
-                # Stream torn down out from under us (defensive).
-                break
-
-            # Pace to ~camera rate; the sleep hands the core to the decode thread.
-            time.sleep(max(0.0, PREVIEW_INTERVAL - (time.monotonic() - t_start)))
-
-        complete = decode_thread.complete
-        if complete:
-            # Snap the bar to full + green as a confirmation beat before teardown.
-            with renderer.lock:
-                _lv.camera_preview_set_progress(100, 1)
-                _lv.lvgl_pump(5, 1)
-    finally:
-        if decode_thread is not None:
-            decode_thread.stop()
-            # Bounded wait for the in-flight add_image() to finish (the compat.threading Thread
-            # has no join()) so the decoder is quiescent before we read it below.
-            for _ in range(80):
-                if not decode_thread.is_alive():
-                    break
-                time.sleep(0.01)
-        camera.stop_video_stream_mode()
-        with renderer.lock:
-            _lv.camera_preview_close()
-            _lv.set_flush_callback(None)
-        if not allow_screensaver:
-            _lv.set_screensaver_timeout(_screensaver_timeout_ms)
-        # Reset the shared HardwareButtons input timer so the next screen's inactivity/
-        # screensaver clock starts fresh.
-        hw.update_last_input_time()
-
-    reason = "complete" if complete else ("cancelled" if cancelled else "invalid")
-    return ScanResult(decoder, complete, cancelled, reason, polls=0, dropped_new=0)
 
 
 def _qr_frame_bytes(part):
@@ -1212,13 +783,8 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
     the user exits (``qr_display_done``); the caller routes on its own fixed Destination and
     ignores the value (parity with the PIL QRDisplayScreen, which also returns nothing useful).
 
-    One frame loop, two pump mechanics — ``run_lvgl_screen``'s split: MicroPython's native task
-    pumps LVGL and owns the display, so this loop only polls; CPython / Pi Zero (blended display)
-    pumps LVGL itself under ``renderer.lock`` and routes pixels through the PIL driver's flush
-    callback. The Pi routes here rather than to the PIL ``QRDisplayScreen`` because the PIL
-    screen reads GPIO through ``HardwareButtons`` — a second reader, independent of the native
-    input gate, that treats a still-held key as *new* input, so a click held slightly too long
-    skipped or instantly dismissed the QR."""
+    The native pump task owns the display on both platforms, so this frame loop only builds,
+    pushes frames, and polls."""
     ensure_lvgl_runtime()
     from seedsigner.compat.l10n import gettext as _
     from seedsigner.models.settings import Settings, SettingsConstants
@@ -1263,37 +829,13 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
     # after a display longer than the timeout the next screen may screensave immediately.
     if not allow_screensaver:
         _lv.set_screensaver_timeout(0)
-    renderer = None
     try:
-        if IS_MICROPYTHON:
-            _lv.clear_result_queue()
-            _lv.qr_display_screen(cfg)
-        else:
-            # CPython / Pi Zero blended display: LVGL only advances on a host pump, so the
-            # frame loop below pumps under renderer.lock (PIL and LVGL never write the panel
-            # concurrently) with pixels routed through the PIL driver's flush callback —
-            # run_lvgl_screen's mechanics. A caller may hand over with a loading spinner
-            # still animating on its background pump (e.g. "Signing..." ->
-            # PSBTSignedQRDisplayView); this entry point bypasses the View.run_screen seam,
-            # so stop it here. TRANSITIONAL: this branch collapses into the MicroPython one
-            # at the Pi native display-pump cutover.
-            stop_loading_pump()
-            from seedsigner.gui.renderer import Renderer
-            renderer = Renderer.get_instance()
-            with renderer.lock:
-                _lv.set_flush_mode("python")
-                _lv.set_flush_callback(_make_flush_callback(renderer.disp))
-                _lv.clear_result_queue()
-                _lv.qr_display_screen(cfg)
+        _lv.clear_result_queue()
+        _lv.qr_display_screen(cfg)
 
         was_tip_active = False
         while True:
-            if IS_MICROPYTHON:
-                event = _lv.poll_for_result()
-            else:
-                with renderer.lock:
-                    _lv.lvgl_pump(5, 1)
-                    event = _lv.poll_for_result()
+            event = _lv.poll_for_result()
             if event is not None:
                 result = _translate_event(event)
                 if isinstance(result, QRBrightnessEvent):
@@ -1310,12 +852,6 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
                     settings.set_value(SettingsConstants.SETTING__QR_DENSITY, result.value)
                     continue
                 # Any other event is the user exiting the screen.
-                if not IS_MICROPYTHON:
-                    # Reset the PIL-side input timer so returning to a PIL screen doesn't
-                    # immediately re-trigger the PIL screensaver (dies with HardwareButtons
-                    # at its retirement).
-                    from seedsigner.hardware.buttons import HardwareButtons
-                    HardwareButtons.get_instance().update_last_input_time()
                 return result
 
             if is_animated:
@@ -1330,8 +866,6 @@ def run_qr_display_screen(encoder, *, allow_screensaver=False):
             # ~6 fps, matching the PIL QRDisplayThread cadence.
             _sleep_ms(166)
     finally:
-        if not IS_MICROPYTHON:
-            _lv.set_flush_callback(None)
         if not allow_screensaver:
             _lv.set_screensaver_timeout(_screensaver_timeout_ms)
 
@@ -1369,29 +903,9 @@ def run_camera_entropy(*, seed_hash=None):
     import camera_entropy
     from seedsigner.compat.l10n import gettext as _
 
-    # On the Pi, LVGL pixels reach the panel only through the PIL driver's flush callback,
-    # and LVGL only advances when Python pumps it — exactly as run_camera_scan. Missing
-    # either does NOT merely stale the screen; it breaks three things at once, which is
-    # why an unpumped flow reads as a total freeze: the render/flush, the native
-    # camera_engine_pump_consume() hook (the only path moving captured frames into the
-    # preview sink, so the preview stays blank however well the camera runs), and LVGL's
-    # input read (so no key registers and the flow cannot be exited). MicroPython's
-    # firmware display task owns rendering, so it neither installs a callback nor pumps.
-    renderer = None
-    if not IS_MICROPYTHON:
-        from seedsigner.gui.renderer import Renderer
-        renderer = Renderer.get_instance()
-
     def _tick(ms):
-        """One idle iteration of a poll loop: advance LVGL, then wait.
-
-        The three loops below are otherwise pure `poll_for_result()` spins, so this is
-        the single place the Pi's pump lives — the CPython equivalent of the firmware
-        display task. A no-op pump on MicroPython, where that task already runs.
-        """
-        if renderer is not None:
-            with renderer.lock:
-                _lv.lvgl_pump(5, 1)
+        """One idle iteration of a poll loop: the native pump task advances LVGL and
+        moves captured frames into the preview sink, so this only waits."""
         _sleep_ms(ms)
 
     # The camera preview isn't LVGL "input activity", so suspend the idle screensaver for the
@@ -1400,10 +914,6 @@ def run_camera_entropy(*, seed_hash=None):
     # SS_OBJ_FLAG_NO_SCREENSAVER, then drop the override and the outer try/finally that restores it.
     _lv.set_screensaver_timeout(0)
     try:
-        if renderer is not None:
-            with renderer.lock:
-                _lv.set_flush_mode("python")
-                _lv.set_flush_callback(_make_flush_callback(renderer.disp))
         # The native overlay holds no strings; hand it every label already translated. Nothing
         # is hardcoded in firmware, so these must be set before the camera starts or the
         # button/text render blank.
@@ -1493,8 +1003,6 @@ def run_camera_entropy(*, seed_hash=None):
         finally:
             camera_entropy.stop()
     finally:
-        if renderer is not None:
-            _lv.set_flush_callback(None)
         _lv.set_screensaver_timeout(_screensaver_timeout_ms)
 
 
@@ -1522,9 +1030,9 @@ def run_io_test_screen():
     # io_test_screen capture-state ints (mirror seedsigner.h io_test_capture_state_t): the
     # host reflects its single-frame grab back into the running screen.
     CAPTURE_IDLE, CAPTURE_CAPTURING, CAPTURE_CAPTURED = 0, 1, 2
-    # The KEY1 capturing window: pump cycles during which the camera engine feeds frames into
-    # the screen's plane before the last is frozen. Each _tick runs one lvgl_pump (->
-    # camera_engine_pump_consume), so this also lets the exposure settle; tune on-device.
+    # The KEY1 capturing window: wall-clock ticks during which the background pump feeds
+    # camera frames into the screen's plane (camera_engine_pump_consume) before the last is
+    # frozen; this also lets the exposure settle; tune on-device.
     CAPTURING_HOLD_TICKS = 25
 
     # title -> top_nav.title; the band + KEY labels pass straight through. Composed from the
@@ -1536,71 +1044,50 @@ def run_io_test_screen():
         "exit_label": _("Exit"),
     })
 
-    # Same platform split as run_camera_entropy: the Pi shares the panel with PIL, so this
-    # runner installs the flush callback and pumps LVGL itself — the native screen animates
-    # the control flashes + the capturing band, all of which need pumping to reach the
-    # panel — while MicroPython's firmware task owns the pump + display, so Python only polls.
-    renderer = None
-    if not IS_MICROPYTHON:
-        from seedsigner.gui.renderer import Renderer
-        renderer = Renderer.get_instance()
-
     def _tick(ms):
-        if renderer is not None:
-            with renderer.lock:
-                _lv.lvgl_pump(5, 1)
+        """One idle iteration of the poll loop: the native pump task advances LVGL and
+        feeds camera frames into the screen's plane, so this only waits."""
         _sleep_ms(ms)
 
-    try:
-        # Build under renderer.lock on the Pi so PIL and LVGL never write the panel at once
-        # (as run_lvgl_screen does); MicroPython builds lock-free. Drop any stale UI event
-        # (e.g. the menu press that launched us) so it can't be misread as a KEY press.
-        if renderer is not None:
-            with renderer.lock:
-                _lv.set_flush_mode("python")
-                _lv.set_flush_callback(_make_flush_callback(renderer.disp))
-                _lv.clear_result_queue()
-                _lv.io_test_screen(cfg)
-        else:
-            _lv.clear_result_queue()
-            _lv.io_test_screen(cfg)
+    # Drop any stale UI event (e.g. the menu press that launched us) so it can't be
+    # misread as a KEY press.
+    _lv.clear_result_queue()
+    _lv.io_test_screen(cfg)
 
-        while True:
-            event = _lv.poll_for_result()
-            if event is None:
-                _tick(20)
-                continue
-            kind, _index, label = event
-            if kind != "aux_key":
-                # io_test_screen forwards only KEY1/2/3; ignore anything else on the queue.
-                continue
-            if label == "KEY1":
-                # Grab a still and show it behind the chrome (Python's single-frame grab).
-                # io_test_camera_start feeds the screen's camera plane from the engine; each
-                # pump in the hold below flows one frame in (camera_engine_pump_consume), and
-                # io_test_camera_stop freezes the last one. The plane + its dims + the blit are
-                # owned by the screen (SCREENS-9) — the app only starts/stops the feed.
-                _lv.io_test_set_capture_state(CAPTURE_CAPTURING)   # "Capturing…" band up
-                captured = False
-                try:
-                    _lv.io_test_camera_start()
-                    for _ in range(CAPTURING_HOLD_TICKS):
-                        _tick(20)
-                    captured = True
-                except OSError as e:
-                    # Camera bring-up failed: leave the square dark, nothing captured.
-                    logger.error("io_test camera grab failed: %r", e)
-                finally:
-                    _lv.io_test_camera_stop()   # freeze the last frame (idempotent)
-                # Band down; KEY2 -> "Clear" on a real capture, blank if the grab failed.
-                _lv.io_test_set_capture_state(CAPTURE_CAPTURED if captured else CAPTURE_IDLE)
-            elif label == "KEY2":
-                _lv.io_test_set_capture_state(CAPTURE_IDLE)       # clear the still
-            elif label == "KEY3":
-                return  # exit -> caller navigates on, reaping the screen
-    finally:
-        if renderer is not None:
-            _lv.set_flush_callback(None)
+    while True:
+        event = _lv.poll_for_result()
+        if event is None:
+            _tick(20)
+            continue
+        kind, _index, label = event
+        if kind != "aux_key":
+            # io_test_screen forwards only KEY1/2/3; ignore anything else on the queue.
+            continue
+        if label == "KEY1":
+            # Grab a still and show it behind the chrome (Python's single-frame grab).
+            # io_test_camera_start feeds the screen's camera plane from the engine; each
+            # hold tick below lets one more frame flow in (camera_engine_pump_consume via
+            # the background pump), and io_test_camera_stop freezes the last one. The plane
+            # + its dims + the blit are owned by the screen (SCREENS-9) — the app only
+            # starts/stops the feed.
+            _lv.io_test_set_capture_state(CAPTURE_CAPTURING)   # "Capturing…" band up
+            captured = False
+            try:
+                _lv.io_test_camera_start()
+                for _ in range(CAPTURING_HOLD_TICKS):
+                    _tick(20)
+                captured = True
+            except OSError as e:
+                # Camera bring-up failed: leave the square dark, nothing captured.
+                logger.error("io_test camera grab failed: %r", e)
+            finally:
+                _lv.io_test_camera_stop()   # freeze the last frame (idempotent)
+            # Band down; KEY2 -> "Clear" on a real capture, blank if the grab failed.
+            _lv.io_test_set_capture_state(CAPTURE_CAPTURED if captured else CAPTURE_IDLE)
+        elif label == "KEY2":
+            _lv.io_test_set_capture_state(CAPTURE_IDLE)       # clear the still
+        elif label == "KEY3":
+            return  # exit -> caller navigates on, reaping the screen
 
 
 def run_seed_address_verification_screen(*, address, type_network, network, title,
@@ -1618,12 +1105,8 @@ def run_seed_address_verification_screen(*, address, type_network, network, titl
     the address, False on Cancel. The native screen forces show_back_button off, so the only
     buttons are Skip 10 (index 0) and Cancel (index 1).
 
-    One poll loop, two pump mechanics — ``run_lvgl_screen``'s split: MicroPython's native task
-    pumps LVGL and owns the display, so this loop only polls; CPython / Pi Zero (blended display)
-    pumps LVGL itself under ``renderer.lock`` and routes pixels through the PIL driver's flush
-    callback. The Pi routes here rather than to the PIL SeedAddressVerificationScreen because
-    that screen reads GPIO through ``HardwareButtons`` — a second input reader, independent of
-    the native input gate."""
+    The native pump task owns the display on both platforms, so this loop only builds and
+    polls."""
     ensure_lvgl_runtime()
     from seedsigner.compat.l10n import gettext as _
 
@@ -1645,34 +1128,12 @@ def run_seed_address_verification_screen(*, address, type_network, network, titl
     # screen's duration (mirrors run_qr_display_screen / run_camera_scan), then restore.
     if not allow_screensaver:
         _lv.set_screensaver_timeout(0)
-    renderer = None
     try:
-        if IS_MICROPYTHON:
-            _lv.clear_result_queue()
-            _lv.seed_address_verification_screen(cfg)
-        else:
-            # CPython / Pi Zero blended display: LVGL only advances on a host pump, so the poll
-            # loop below pumps under renderer.lock (PIL and LVGL never write the panel
-            # concurrently) with pixels routed through the PIL driver's flush callback —
-            # run_lvgl_screen's mechanics. A caller may hand over with a loading spinner still
-            # animating on its background pump, so stop it here. TRANSITIONAL: this branch
-            # collapses into the MicroPython one at the Pi native display-pump cutover.
-            stop_loading_pump()
-            from seedsigner.gui.renderer import Renderer
-            renderer = Renderer.get_instance()
-            with renderer.lock:
-                _lv.set_flush_mode("python")
-                _lv.set_flush_callback(_make_flush_callback(renderer.disp))
-                _lv.clear_result_queue()
-                _lv.seed_address_verification_screen(cfg)
+        _lv.clear_result_queue()
+        _lv.seed_address_verification_screen(cfg)
 
         while True:
-            if IS_MICROPYTHON:
-                event = _lv.poll_for_result()
-            else:
-                with renderer.lock:
-                    _lv.lvgl_pump(5, 1)
-                    event = _lv.poll_for_result()
+            event = _lv.poll_for_result()
             if event is not None:
                 if _translate_event(event) == 0:
                     # Skip 10: jump the worker ahead and keep scanning.
@@ -1687,14 +1148,7 @@ def run_seed_address_verification_screen(*, address, type_network, network, titl
             _lv.seed_address_verification_set_progress(_progress_text())
             _sleep_ms(100)
 
-        if not IS_MICROPYTHON:
-            # Reset the PIL-side input timer so returning to a PIL screen doesn't immediately
-            # re-trigger the PIL screensaver (dies with HardwareButtons at its retirement).
-            from seedsigner.hardware.buttons import HardwareButtons
-            HardwareButtons.get_instance().update_last_input_time()
         return matched
     finally:
-        if not IS_MICROPYTHON:
-            _lv.set_flush_callback(None)
         if not allow_screensaver:
             _lv.set_screensaver_timeout(_screensaver_timeout_ms)

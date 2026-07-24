@@ -1,19 +1,15 @@
 """Unit tests for the native QR-display frame driver (`run_qr_display_screen`) and its
 `EncodeQR` -> native cfg mapping (`_encoder_to_qr_cfg`) in `seedsigner.gui.lvgl_screen_runner`.
 
-The driver runs on BOTH platforms in production; one shared frame loop with per-platform pump
-mechanics. These tests fake the native module + settings and pin `IS_MICROPYTHON` to exercise
-each branch deterministically: the shared loop/cfg tests drive the MicroPython (poll-only)
-branch, and the CPython (blended display) tests at the bottom cover the pump/flush mechanics.
+The native pump task owns the display on both platforms, so the driver is one build + poll
+frame loop with no per-platform branch. These tests fake the native module + settings and
+drive that loop deterministically.
 """
 import sys
 import time
 from unittest.mock import MagicMock
 
 sys.modules.setdefault("seedsigner.hardware.buttons", MagicMock())
-# The CPython branch imports the Renderer singleton; stub the module so a standalone run of
-# this file doesn't pull in Pi display hardware deps (the full suite's base.py does the same).
-sys.modules.setdefault("seedsigner.gui.renderer", MagicMock())
 
 import seedsigner.gui.lvgl_screen_runner as lvgl_screen_runner
 from seedsigner.gui.lvgl_screen_runner import _encoder_to_qr_cfg, _qr_frame_bytes
@@ -116,13 +112,10 @@ class _FakeSettings:
         self.values[attr] = value
 
 
-def _patch_common(monkeypatch, fake_lv, fake_settings, is_micropython=True):
+def _patch_common(monkeypatch, fake_lv, fake_settings):
     monkeypatch.setattr(lvgl_screen_runner, "_lv", fake_lv)
     monkeypatch.setattr(lvgl_screen_runner, "ensure_lvgl_runtime", lambda: None)
     monkeypatch.setattr(lvgl_screen_runner, "_screensaver_timeout_ms", 60000)
-    # Pin the platform branch: the shared loop/cfg tests exercise the MicroPython
-    # (poll-only) branch; the CPython blended-display mechanics have their own tests.
-    monkeypatch.setattr(lvgl_screen_runner, "IS_MICROPYTHON", is_micropython)
     monkeypatch.setattr("seedsigner.models.settings.Settings.get_instance",
                         classmethod(lambda cls: fake_settings))
     monkeypatch.setattr(time, "sleep_ms", lambda *a: None, raising=False)
@@ -254,61 +247,3 @@ def test_run_qr_display_density_change_resplits_and_persists(monkeypatch):
     assert (SettingsConstants.SETTING__QR_DENSITY, 3) in fake_settings.set_calls
 
     fake_lv.qr_display_set_frame.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# run_qr_display_screen - CPython / Pi Zero blended-display pump mechanics
-# ---------------------------------------------------------------------------
-
-def _patch_cpython(monkeypatch, fake_lv, fake_settings):
-    """Drive the CPython (blended display) branch: fake the Renderer singleton the driver
-    pulls in, and no-op the frame-cadence sleep."""
-    _patch_common(monkeypatch, fake_lv, fake_settings, is_micropython=False)
-    import seedsigner.gui.renderer as renderer_mod
-    fake_renderer = MagicMock()
-    monkeypatch.setattr(renderer_mod, "Renderer",
-                        MagicMock(get_instance=MagicMock(return_value=fake_renderer)))
-    monkeypatch.setattr(time, "sleep", lambda *a: None)
-    return fake_renderer
-
-
-def test_run_qr_display_cpython_installs_and_clears_flush_callback(monkeypatch):
-    fake_lv = MagicMock()
-    # Drive one animation iteration (pump + frame push), then exit.
-    fake_lv.poll_for_result.side_effect = [None, ("button_selected", lvgl_screen_runner.RET_CODE__BACK_BUTTON, "qr_display_done")]
-    fake_lv.qr_display_is_tip_active.return_value = False
-    fake_settings = _FakeSettings()
-    _patch_cpython(monkeypatch, fake_lv, fake_settings)
-
-    lvgl_screen_runner.run_qr_display_screen(_FakeEncoder(seq_len=3))
-
-    # Blended display: python flush mode + callback installed at build, dropped on exit.
-    fake_lv.set_flush_mode.assert_called_once_with("python")
-    assert fake_lv.set_flush_callback.call_args_list[0][0][0] is not None
-    assert fake_lv.set_flush_callback.call_args_list[-1][0][0] is None
-    # LVGL only advances on a host pump here (the native task does this on MicroPython).
-    assert fake_lv.lvgl_pump.called
-    # The shared frame loop still ran: one frame pushed while the tip was inactive.
-    fake_lv.qr_display_set_frame.assert_called_once()
-
-
-def test_run_qr_display_cpython_stops_loading_pump_and_resets_input_timer(monkeypatch):
-    fake_lv = MagicMock()
-    fake_lv.poll_for_result.return_value = ("button_selected", lvgl_screen_runner.RET_CODE__BACK_BUTTON, "qr_display_done")
-    fake_settings = _FakeSettings()
-    _patch_cpython(monkeypatch, fake_lv, fake_settings)
-
-    stop_calls = []
-    monkeypatch.setattr(lvgl_screen_runner, "stop_loading_pump", lambda: stop_calls.append(1))
-    import seedsigner.hardware.buttons as buttons_mod
-    fake_hw_buttons = MagicMock()
-    monkeypatch.setattr(buttons_mod, "HardwareButtons", fake_hw_buttons)
-
-    lvgl_screen_runner.run_qr_display_screen(_FakeEncoder(seq_len=1))
-
-    # A caller may hand over with a loading spinner still animating (e.g. "Signing..." ->
-    # the signed-PSBT QR); this entry point bypasses the View.run_screen seam, so the
-    # driver must stop the spinner pump itself.
-    assert stop_calls == [1]
-    # Exit resets the PIL-side input timer so the next PIL screen doesn't insta-screensave.
-    fake_hw_buttons.get_instance.return_value.update_last_input_time.assert_called_once()
