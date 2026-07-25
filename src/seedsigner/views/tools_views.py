@@ -671,7 +671,7 @@ class ToolsAddressExplorerAddressTypeView(View):
             title=_("Address Explorer"),
             button_data=button_data,
         )
-        if self.seed_num is not None:
+        if self.seed is not None:
             if script_type == SettingsConstants.CUSTOM_DERIVATION:
                 derivation_text = self.custom_derivation
             else:

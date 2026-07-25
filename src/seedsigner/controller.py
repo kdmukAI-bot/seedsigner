@@ -248,7 +248,7 @@ class Controller(Singleton):
         return self._storage
 
 
-    def discard_seed(self, seed: Seed):
+    def discard_seed(self, seed: "Seed"):
         self.storage.seeds.remove(seed)
 
 

@@ -40,13 +40,13 @@ class TestSeedFlows(FlowTest):
             via NEXT walks page-by-page; DONE on the final page lands on the backup-test
             prompt (A1 LVGL screen swap).
         """
-        # Load a finalized 12-word Seed (3 pages of 4 words) as seed_num=0
+        # Load a finalized 12-word Seed (3 pages of 4 words)
         mnemonic = "blush twice taste dawn feed second opinion lazy thumb play neglect impact".split()
         self.controller.storage.set_pending_seed(Seed(mnemonic=mnemonic))
-        self.controller.storage.finalize_pending_seed()
+        seed = self.controller.storage.finalize_pending_seed()
 
         self.run_sequence(
-            initial_destination_view_args=dict(seed_num=0),
+            initial_destination_view_args=dict(seed=seed),
             sequence=[
                 FlowStep(seed_views.SeedWordsView, button_data_selection=seed_views.SeedWordsView.NEXT),  # page 1/3
                 FlowStep(seed_views.SeedWordsView, button_data_selection=seed_views.SeedWordsView.NEXT),  # page 2/3

@@ -1481,8 +1481,6 @@ class SeedTranscribeSeedQRFormatView(View):
 
 
     def run(self):
-        from seedsigner.gui.screens import seed_screens
-
         if self.settings.get_value(SettingsConstants.SETTING__COMPACT_SEEDQR) != SettingsConstants.OPTION__ENABLED:
             # Only configured for standard SeedQR
             return Destination(
