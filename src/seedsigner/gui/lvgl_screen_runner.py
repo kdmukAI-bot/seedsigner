@@ -69,10 +69,13 @@ def ensure_lvgl_runtime():
             # On-device the native module sets up display + input itself.
             lv.init()
         else:
-            # Pi Zero (CPython): LVGL renders through the existing ST7789 driver
-            # via a flush callback; input is read natively (gpiochip ioctl).
+            # Pi Zero (CPython): bring up the native ST7789 panel (SPI + GPIO) before LVGL,
+            # so the background pump thread's native flush has an initialized backend to
+            # paint into (an un-brought-up backend no-op-paints, leaving the panel blank).
+            # native_display_init also claims the native input lines (no separate
+            # native_input_init call needed).
+            lv.native_display_init()
             lv.lvgl_init(hor_res=240, ver_res=240)
-            lv.native_input_init()
 
         from seedsigner.controller import Controller
         _screensaver_timeout_ms = Controller.get_instance().screensaver_activation_ms
@@ -1030,10 +1033,16 @@ def run_io_test_screen():
     # io_test_screen capture-state ints (mirror seedsigner.h io_test_capture_state_t): the
     # host reflects its single-frame grab back into the running screen.
     CAPTURE_IDLE, CAPTURE_CAPTURING, CAPTURE_CAPTURED = 0, 1, 2
-    # The KEY1 capturing window: wall-clock ticks during which the background pump feeds
-    # camera frames into the screen's plane (camera_engine_pump_consume) before the last is
-    # frozen; this also lets the exposure settle; tune on-device.
-    CAPTURING_HOLD_TICKS = 25
+    # KEY1 camera grab timing. The background pump feeds camera frames asynchronously, so the
+    # grab waits for the first real frame (io_test_camera_frame_ready reflects the pump's
+    # stash) before freezing:
+    #   * FRAME_WAIT_TICKS bounds that wait. The libcamera cold-start's first delivered frame
+    #     can exceed ~500ms on the Pi Zero OV5647; if the wait elapses with no frame the grab
+    #     is treated as failed (plane stays dark).
+    #   * SETTLE_TICKS then lets a few more frames flow so the frozen still reflects settled
+    #     exposure (AE/AWB), not the dim first frame.
+    FRAME_WAIT_TICKS = 150   # up to ~3s for the first delivered frame
+    SETTLE_TICKS = 20        # ~0.4s more after the first frame for exposure to settle
 
     # title -> top_nav.title; the band + KEY labels pass straight through. Composed from the
     # same msgids as the PIL IOTestScreen, so the wording and its translations carry over.
@@ -1064,19 +1073,28 @@ def run_io_test_screen():
             # io_test_screen forwards only KEY1/2/3; ignore anything else on the queue.
             continue
         if label == "KEY1":
-            # Grab a still and show it behind the chrome (Python's single-frame grab).
-            # io_test_camera_start feeds the screen's camera plane from the engine; each
-            # hold tick below lets one more frame flow in (camera_engine_pump_consume via
-            # the background pump), and io_test_camera_stop freezes the last one. The plane
-            # + its dims + the blit are owned by the screen (SCREENS-9) — the app only
-            # starts/stops the feed.
+            # Grab a still and show it behind the chrome. io_test_camera_start feeds the
+            # screen's camera plane from the native engine; the background pump stashes each
+            # frame (camera_engine_pump_consume) and io_test_camera_stop freezes the last.
+            # The plane + its dims + the blit are owned by the screen (SCREENS-9) — the app
+            # only starts/stops the feed and paces the grab: wait for the pump to stash the
+            # first frame (bounded by FRAME_WAIT_TICKS), then let exposure settle before
+            # freezing.
             _lv.io_test_set_capture_state(CAPTURE_CAPTURING)   # "Capturing…" band up
             captured = False
             try:
                 _lv.io_test_camera_start()
-                for _ in range(CAPTURING_HOLD_TICKS):
+                waited = 0
+                while not _lv.io_test_camera_frame_ready() and waited < FRAME_WAIT_TICKS:
                     _tick(20)
-                captured = True
+                    waited += 1
+                if _lv.io_test_camera_frame_ready():
+                    # First frame arrived; let a few more flow so the still isn't the dim
+                    # first frame (AE/AWB still settling).
+                    for _ in range(SETTLE_TICKS):
+                        _tick(20)
+                    captured = True
+                # else: timed out with no frame — treat as a failed grab (plane stays dark).
             except OSError as e:
                 # Camera bring-up failed: leave the square dark, nothing captured.
                 logger.error("io_test camera grab failed: %r", e)
