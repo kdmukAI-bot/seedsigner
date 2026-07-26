@@ -212,8 +212,16 @@ class Controller(Singleton):
 
         controller.microsd = MicroSD.get_instance()
         if not IS_MICROPYTHON:
-            # SD hotplug detection uses Linux mdev + a FIFO; not wired on ESP32 yet.
+            # SD hotplug detection uses Linux mdev + a FIFO.
             controller.microsd.start_detection()
+        else:
+            # ESP32 has no card-detect GPIO, so runtime insert/remove is polled from the
+            # LVGL pump loop (MicroSD.poll) rather than a detection thread. Here we only
+            # sync the *boot* state: an absent card must disable Persistent Settings and
+            # show "Insert SD card to enable". A present card needs no action — settings
+            # already loaded and the entry's default options are correct.
+            if not controller.microsd.is_inserted:
+                Settings.handle_microsd_state_change(action=MicroSD.ACTION__REMOVED)
 
         # Store one working psbt in memory
         controller.psbt = None

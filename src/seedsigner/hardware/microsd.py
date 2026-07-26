@@ -3,7 +3,6 @@ import os
 import time
 
 from seedsigner.compat import IS_MICROPYTHON
-from seedsigner.models.settings_definition import SettingsConstants
 from seedsigner.models.singleton import Singleton
 from seedsigner.models.threads import BaseThread
 
@@ -36,27 +35,19 @@ class MicroSD(Singleton, BaseThread):
     def ensure_mounted(cls) -> bool:
         """Make the microSD available at its mount point and report whether it is.
 
-        ESP32 only: nothing mounts the card this early in boot, so mount it here.
-        Idempotent — a mount already done by a prior call or by the frozen facade is
-        detected via os.stat and left alone. Fail-soft: a missing or unreadable card
-        returns False (callers fall back to defaults or skip writes) and never raises.
-        A no-op returning True on CPython/SeedSigner OS, where the card (if any) is
-        mounted outside the app.
+        ESP32 only: nothing mounts the card this early in boot. Delegates to the frozen
+        facade (``seedsigner_lvgl_screens.sd_ensure``), which is the single owner of the
+        /sd mount lifecycle — so mount, unmount-on-remove and remount-on-insert all
+        go through one authority instead of the app and the facade each holding a copy.
+        Idempotent + fail-soft: a missing/unreadable card returns False (callers fall back
+        to defaults or skip writes) and never raises. A no-op returning True on
+        CPython/SeedSigner OS, where the card (if any) is mounted outside the app.
         """
         if not IS_MICROPYTHON:
             return True
-        mount = SettingsConstants.MICROSD_MOUNT
         try:
-            os.stat(mount)             # already mounted (facade import or a prior call)?
-            return True
-        except OSError:
-            pass
-        try:
-            import machine
-            import vfs
-            sd = machine.SDCard(slot=0, width=4)   # slot 0 = IOMUX; VDD via LDO_VO4
-            vfs.mount(vfs.VfsFat(sd), mount)
-            return True
+            import seedsigner_lvgl_screens as _facade
+            return _facade.sd_ensure()
         except Exception:
             return False
 
@@ -66,16 +57,46 @@ class MicroSD(Singleton, BaseThread):
         from seedsigner.models.settings import Settings  # Import here to avoid circular import issues
 
         if IS_MICROPYTHON:
-            # ESP32: the card is the microSD mount; report whether it is really
-            # accessible so save() won't write to an unmounted card and Persistent
-            # Settings reflects a genuinely-present card (parity with SeedSigner OS).
-            return MicroSD.ensure_mounted()
+            # ESP32: honest liveness probe via the facade (the single /sd owner). Unlike a
+            # bare mount check — which stays True after a physical pull because the mount
+            # registration lingers — sd_live() probes the card, so save() won't write to a
+            # gone card and Persistent Settings reflects a genuinely-present card.
+            try:
+                import seedsigner_lvgl_screens as _facade
+                return _facade.sd_live()
+            except Exception:
+                return False
 
         if Settings.HOSTNAME == Settings.SEEDSIGNER_OS:
             return os.path.exists(MicroSD.MOUNT_POINT)
 
         # CPython desktop dev: no real card — treat as always available.
         return True
+
+
+    @classmethod
+    def poll(cls):
+        """ESP32 microSD hotplug tick. Called from the LVGL pump loop (~20ms); the bus
+        probe itself is throttled inside the facade's sd_poll(), so calling every iteration
+        is cheap. On an insert/remove transition, updates Settings (Persistent Settings
+        availability + help text) and shows a state-change toast — mirroring the
+        SeedSigner-OS mdev path (MicroSD.run), but driven by polling since the P4 wires no
+        card-detect GPIO. A no-op off MicroPython."""
+        if not IS_MICROPYTHON:
+            return
+        try:
+            import seedsigner_lvgl_screens as _facade
+            change = _facade.sd_poll()   # "inserted" | "removed" | None (self-throttled)
+        except Exception:
+            return
+        if not change:
+            return
+        from seedsigner.controller import Controller
+        from seedsigner.gui.toast import SDCardStateChangeToastManagerThread
+        from seedsigner.models.settings import Settings
+        action = cls.ACTION__INSERTED if change == "inserted" else cls.ACTION__REMOVED
+        Settings.handle_microsd_state_change(action=action)
+        Controller.get_instance().activate_toast(SDCardStateChangeToastManagerThread(action=action))
 
 
     def start_detection(self):

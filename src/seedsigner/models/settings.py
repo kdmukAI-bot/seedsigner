@@ -170,16 +170,22 @@ class Settings(Singleton):
     def save(self):
         from seedsigner.hardware.microsd import MicroSD
         if self._data[SettingsConstants.SETTING__PERSISTENT_SETTINGS] == SettingsConstants.OPTION__ENABLED and MicroSD.get_instance().is_inserted:
-            with open(Settings.SETTINGS_FILENAME, 'w') as settings_file:
-                json.dump(self._data, settings_file, **_JSON_KWARGS)
-                # SeedSignerOS makes removing the microsd possible, flush and then fsync forces persistent settings to disk
-                # without this, recent settings changes could be missing after the microsd card was removed
-                settings_file.flush()
-                # MicroPython 1.27 has no per-fd fsync; call it only where present.
-                # The flush() above still applies on platforms without it.
-                fsync = getattr(os, "fsync", None)
-                if fsync is not None:
-                    fsync(settings_file.fileno())
+            try:
+                with open(Settings.SETTINGS_FILENAME, 'w') as settings_file:
+                    json.dump(self._data, settings_file, **_JSON_KWARGS)
+                    # SeedSignerOS makes removing the microsd possible, flush and then fsync forces persistent settings to disk
+                    # without this, recent settings changes could be missing after the microsd card was removed
+                    settings_file.flush()
+                    # MicroPython 1.27 has no per-fd fsync; call it only where present.
+                    # The flush() above still applies on platforms without it.
+                    fsync = getattr(os, "fsync", None)
+                    if fsync is not None:
+                        fsync(settings_file.fileno())
+            except OSError as e:
+                # A card pulled between the is_inserted check and the write raises here
+                # (ESP32: after a physical pull the mount reads stale-live for up to one
+                # poll cycle). Fail soft — a lost write must not crash the app.
+                logger.warning("Settings.save skipped: microSD write failed (%s)", e)
 
 
     def update(self, new_settings: dict):
@@ -341,7 +347,10 @@ class Settings(Singleton):
         """
         from seedsigner.hardware.microsd import MicroSD
 
-        if Settings.HOSTNAME == Settings.SEEDSIGNER_OS:
+        # SeedSigner OS drives this from mdev; ESP32 (MicroPython) drives it from the
+        # polled hotplug tick (MicroSD.poll) — the P4 wires no card-detect GPIO. Both
+        # need the same option/help-text updates, so the gate covers both.
+        if Settings.HOSTNAME == Settings.SEEDSIGNER_OS or IS_MICROPYTHON:
             if action == MicroSD.ACTION__INSERTED:
                 # SD card was just inserted.
                 # Restore persistent settings back to defaults

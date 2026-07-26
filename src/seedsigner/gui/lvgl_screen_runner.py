@@ -594,10 +594,16 @@ def run_lvgl_screen(screen, *, attrs=None):
     # runs the idle screensaver; this loop only builds once and polls for the result.
     _lv.clear_result_queue()
     screen_fn(*args)
+    from seedsigner.hardware.microsd import MicroSD
     while True:
         event = _lv.poll_for_result()
         if event is not None:
             return _translate_event(event)
+        # microSD hotplug tick — this poll loop is the only frequent Python cadence on
+        # ESP32, which has no card-detect GPIO and so detects insert/remove by polling.
+        # A no-op off MicroPython (Linux uses mdev), and self-throttled inside the facade,
+        # so calling it every iteration is cheap; GIL-serialized with all SD I/O here.
+        MicroSD.poll()
         _sleep_ms(20)
 
 
