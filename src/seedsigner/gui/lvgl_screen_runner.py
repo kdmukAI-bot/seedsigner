@@ -73,9 +73,15 @@ def ensure_lvgl_runtime():
             # so the background pump thread's native flush has an initialized backend to
             # paint into (an un-brought-up backend no-op-paints, leaving the panel blank).
             # native_display_init also claims the native input lines (no separate
-            # native_input_init call needed).
-            lv.native_display_init()
-            lv.lvgl_init(hor_res=240, ver_res=240)
+            # native_input_init call needed). The resolution comes from the Pi-only
+            # SETTING__DISPLAY_RESOLUTION ("{width}x{height}"); Settings is up well before
+            # this init (see the camera-rotation note below).
+            from seedsigner.models.settings import Settings, SettingsConstants
+            resolution = Settings.get_instance().get_value(
+                SettingsConstants.SETTING__DISPLAY_RESOLUTION, default_if_none=True)
+            width, height = (int(dimension) for dimension in resolution.split("x"))
+            lv.native_display_init(width=width, height=height)
+            lv.lvgl_init(hor_res=width, ver_res=height)
 
         from seedsigner.controller import Controller
         _screensaver_timeout_ms = Controller.get_instance().screensaver_activation_ms

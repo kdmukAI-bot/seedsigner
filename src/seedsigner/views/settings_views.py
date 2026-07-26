@@ -5,7 +5,7 @@ from seedsigner.compat.l10n import gettext as _
 from seedsigner.gui.constants import GUIConstants, SeedSignerIconConstants, StatusType, ButtonStyle
 from seedsigner.models.settings import Settings, SettingsConstants, SettingsDefinition
 
-from .view import ButtonOption, Destination, MainMenuView, RET_CODE__BACK_BUTTON, View
+from .view import ButtonOption, Destination, MainMenuView, RestartView, RET_CODE__BACK_BUTTON, View
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +17,12 @@ def _is_disabled_on_this_hardware(attr_name: str) -> bool:
         future hardware-divergent settings.
     """
     # Camera rotation reaches the camera through the Pi-only native set_camera_rotation
-    # binding; the ESP32 camera engines do not read the setting.
-    return IS_MICROPYTHON and attr_name == SettingsConstants.SETTING__CAMERA_ROTATION
+    # binding, and screen resolution is compile-time firmware on the ESP32; neither is a
+    # live knob on MicroPython, so both route to the disabled view there.
+    return IS_MICROPYTHON and attr_name in (
+        SettingsConstants.SETTING__CAMERA_ROTATION,
+        SettingsConstants.SETTING__DISPLAY_RESOLUTION,
+    )
 
 
 
@@ -292,11 +296,12 @@ class SettingsEntryUpdateSelectionView(View):
             value=updated_value
         )
 
-        if self.settings_entry.attr_name == SettingsConstants.SETTING__DISPLAY_CONFIGURATION:
-            self.renderer.initialize_display()
-
-        elif self.settings_entry.attr_name == SettingsConstants.SETTING__DISPLAY_COLOR_INVERTED:
-            self.renderer.disp.invert(enabled=updated_value == SettingsConstants.OPTION__ENABLED)
+        if self.settings_entry.attr_name == SettingsConstants.SETTING__DISPLAY_RESOLUTION and not IS_MICROPYTHON:
+            # The native panel + LVGL are sized to the resolution at startup; a live switch
+            # (tearing down and rebuilding every screen) is not yet wired, so the change
+            # takes effect on the next restart. The value is already persisted above; reaching
+            # here means it changed (an unchanged select returned early), so offer the restart.
+            return Destination(DisplayResolutionRestartView)
 
         if destination:
             return destination
@@ -379,6 +384,36 @@ class SettingsEntryDisabledView(View):
 
 
 
+class DisplayResolutionRestartView(View):
+    """
+        Shown after the Pi screen-resolution setting is changed. The native panel and LVGL
+        are sized to the resolution at startup, so a change only takes effect after a restart
+        (a live switch would tear down and rebuild every screen — not yet wired). The new
+        value is already persisted; this offers an immediate restart, or Back returns to
+        Settings and the change applies on the next boot.
+    """
+    def run(self):
+        # TRANSLATOR_NOTE: Button that restarts the device now to apply a setting.
+        RESTART_NOW = ButtonOption("Restart now")
+
+        # TRANSLATOR_NOTE: Explains that a screen-resolution change applies after a restart.
+        text = _("The new screen resolution takes effect after a restart.")
+
+        selected_menu_num = self.run_button_list_screen(
+            title=_("Restart Required"),
+            text=text,
+            button_data=[RESTART_NOW],
+            is_bottom_list=True,
+        )
+
+        if selected_menu_num == RET_CODE__BACK_BUTTON:
+            # The value is persisted; apply it on the next boot.
+            return Destination(SettingsMenuView, view_args={"visibility": SettingsConstants.VISIBILITY__HARDWARE})
+
+        return Destination(RestartView)
+
+
+
 class SettingsIngestSettingsQRView(View):
     def __init__(self, data: str):
         from seedsigner.hardware.microsd import MicroSD
@@ -388,14 +423,9 @@ class SettingsIngestSettingsQRView(View):
         # user.
         self.config_name, settings_update_dict = Settings.parse_settingsqr(data)
 
-        changes_display_driver = (
-            SettingsConstants.SETTING__DISPLAY_CONFIGURATION in settings_update_dict and
-            self.settings.get_value(SettingsConstants.SETTING__DISPLAY_CONFIGURATION) != settings_update_dict[SettingsConstants.SETTING__DISPLAY_CONFIGURATION])
-            
+        # A resolution change arriving via SettingsQR just persists; like any resolution
+        # change it applies on the next restart (the native panel is sized at startup).
         self.settings.update(settings_update_dict)
-
-        if changes_display_driver:
-            self.renderer.initialize_display()
 
         if MicroSD.get_instance().is_inserted and self.settings.get_value(SettingsConstants.SETTING__PERSISTENT_SETTINGS) == SettingsConstants.OPTION__ENABLED:
             self.status_message = _("Persistent Settings enabled. Settings saved to SD card.")
