@@ -139,8 +139,14 @@ class LocaleSelectionView(View):
         from seedsigner.gui.lvgl_screen_runner import (
             discover_locale_packs,
             list_available_locales,
+            run_loading_screen,
             set_locale_fonts,
         )
+
+        # Building the picker scans the pack store and stages a pre-rendered endonym image
+        # per non-Latin row, which can take a couple of seconds; show the fire-and-forget
+        # loading spinner meanwhile. The picker screen's own render tears it down.
+        run_loading_screen(_("Loading languages..."))
 
         cur_language_code = self.settings.get_value(SettingsConstants.SETTING__LOCALE)
 
@@ -164,6 +170,11 @@ class LocaleSelectionView(View):
             english, native = SettingsConstants.get_locale_names(code, endonym=pack.get("endonym"))
             rows.append({"code": code, "english": english, "native": native})
             seen.add(code)
+
+        # Order the picker: English pinned at the top, then every other language
+        # alphabetically by its English name. (.lower(), not .casefold(), for MicroPython.)
+        rows.sort(key=lambda row: (row["code"] != SettingsConstants.LOCALE__ENGLISH,
+                                   row["english"].lower()))
 
         selected_index = self.run_locale_picker_screen(
             title=_(SettingsDefinition.get_settings_entry(attr_name=SettingsConstants.SETTING__LOCALE).display_name),
