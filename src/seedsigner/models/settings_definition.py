@@ -250,15 +250,17 @@ class SettingsConstants:
         The catalogs live in the DEPLOYED language packs — the SAME self-contained unit
         the fonts come from — so this matches ``LOCALE_PACK_DIR`` (the font seam's root):
         ``"lang-packs"`` relative to CWD on the Pi (packs deploy beside the ``.so``),
-        ``"/sd"`` on ESP32 (the microSD pack root). A locale's font AND its ``.mo`` ship
-        together, so a language is fully available or not at all — no packs means English
-        only (baked floor), NEVER translated text with no font to render it (which is why
-        there is no fall-back to the app's bundled ``seedsigner-translations``: those
-        catalogs cover non-Latin languages the baked floor cannot draw).
+        ``"/lang-packs"`` on ESP32 (packs baked into internal flash so a cardless device is
+        fully localized; the microSD becomes an optional override in a later phase). A
+        locale's font AND its ``.mo`` ship together, so a language is fully available or not
+        at all — no packs means English only (baked floor), NEVER translated text with no
+        font to render it (which is why there is no fall-back to the app's bundled
+        ``seedsigner-translations``: those catalogs cover non-Latin languages the baked
+        floor cannot draw).
         """
         from seedsigner.compat import IS_MICROPYTHON
         if IS_MICROPYTHON:
-            return cls.MICROSD_MOUNT
+            return "/lang-packs"
         return "lang-packs"
 
 
