@@ -5,6 +5,8 @@ from picamera import PiCamera
 from threading import Thread
 import time
 
+from seedsigner.models.bench_stats import BENCH
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,6 +27,13 @@ class PiVideoStream:
 		self.should_stop = False
 		self.is_stopped = True
 
+		# Capture sequence number, incremented once per frame the camera delivers. Held
+		# together with its frame in a single tuple so a reader cannot pair one capture's
+		# number with another capture's pixels. Consumers read `latest` to tell a fresh
+		# delivery from the same frame served twice; `read()` is unaffected.
+		self.frame_seq = 0
+		self.latest = (0, None)
+
 	def start(self):
 		# start the thread to read frames from the video stream
 		t = Thread(target=self.update, args=())
@@ -39,6 +48,9 @@ class PiVideoStream:
 			# grab the frame from the stream and clear the stream in
 			# preparation for the next frame
 			self.frame = f.array
+			self.frame_seq += 1
+			self.latest = (self.frame_seq, self.frame)
+			BENCH.capture_frames += 1
 			self.rawCapture.truncate(0)
 
 			# if the thread indicator variable is set, stop the thread

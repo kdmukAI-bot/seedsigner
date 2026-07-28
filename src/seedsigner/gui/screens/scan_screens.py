@@ -6,6 +6,7 @@ from PIL import Image, ImageDraw
 
 from seedsigner.gui import renderer
 from seedsigner.gui.components import GUIConstants, Fonts, resize_image_to_fill
+from seedsigner.models.bench_stats import BENCH
 from seedsigner.models.decode_qr import DecodeQR
 from seedsigner.models.threads import BaseThread, ThreadsafeCounter
 
@@ -46,9 +47,24 @@ class ScanScreen(BaseScreen):
     framerate: int = 6  # TODO: alternate optimization for Pi Zero 2W?
     render_rect: tuple[int,int,int,int] = None
 
+    # When set, the scan runs for a fixed measurement window instead of until the payload
+    # is complete or the user backs out. Only the benchmark harness sets it.
+    bench_seconds: float = None
+
+    # Focus mode: run unbounded, draw a rolling readout over the live preview, and record
+    # nothing. For getting aim, focus and lighting right *before* a measured run -- an
+    # out-of-focus camera moves the success ratio and the hit rate without touching the
+    # decode time, which is easy to misread as a slower board.
+    bench_focus: bool = False
+
     FRAME__ADDED_PART = 1
     FRAME__REPEATED_PART = 2
     FRAME__MISS = 3
+
+    # How often the focus readout refreshes, and therefore the length of the interval it
+    # summarises. Short enough to feel live while turning the lens, long enough that the
+    # decode counts behind it are not single-digit noise.
+    BENCH_FOCUS_REPORT_S = 1.5
 
     def __post_init__(self):
         from seedsigner.hardware.camera import Camera
@@ -89,11 +105,19 @@ class ScanScreen(BaseScreen):
             self.render_height = self.render_rect[3] - self.render_rect[1]
             self.decoder_fps = "0.0"
 
+            # Set by the decode loop in focus mode only; drawn over the preview. Left None
+            # for a measured run, so the extra text costs nothing there.
+            self.bench_lines = None
+
             super().__init__()
 
 
         def run(self):
             instructions_font = Fonts.get_font(GUIConstants.get_body_font_name(), GUIConstants.get_button_font_size())
+
+            # Monospaced, so the focus readout's columns don't jitter as the digits change.
+            bench_font_size = 12
+            bench_font = Fonts.get_font(GUIConstants.FIXED_WIDTH_FONT_NAME, bench_font_size)
 
             # pre-calculate how big the animated QR percent display can be
             (left, top, right, bottom) = instructions_font.getbbox("100%")
@@ -114,6 +138,19 @@ class ScanScreen(BaseScreen):
                     with self.renderer.lock:
                         # Use nearest neighbor resizing for max speed
                         frame = resize_image_to_fill(frame, self.render_width, self.render_height, sampling_method=Image.Resampling.NEAREST)
+
+                        if self.bench_lines:
+                            # Focus readout, top-left so the centre of the frame stays
+                            # clear for the QR being aimed at. Drawn twice for a 1px
+                            # shadow, because the text sits over a live camera image.
+                            bench_draw = ImageDraw.Draw(frame)
+                            bench_y = 2
+                            for bench_line in self.bench_lines:
+                                bench_draw.text(xy=(3, bench_y + 1), text=bench_line,
+                                                fill="black", font=bench_font)
+                                bench_draw.text(xy=(2, bench_y), text=bench_line,
+                                                fill=GUIConstants.ACCENT_COLOR, font=bench_font)
+                                bench_y += bench_font_size + 2
 
                         if scan_text:
                             # Note: shadowed text (adding a 'stroke' outline) can
@@ -217,6 +254,7 @@ class ScanScreen(BaseScreen):
                                 )
 
                         self.renderer.show_image(frame, show_direct=True)
+                        BENCH.display_frames += 1
 
                 if self.camera._video_stream is None:
                     break
@@ -233,9 +271,65 @@ class ScanScreen(BaseScreen):
 
         num_frames = 0
         start_time = time.time()
+
+        # Capture number of the frame the previous pass decoded. This loop is not
+        # frame-gated -- it re-decodes whatever is in the latest-frame slot, including a
+        # frame it has already seen -- so the number is recorded, not acted on: it lets
+        # the benchmark report a decode rate over distinct captures alongside the raw one.
+        last_seq = 0
+
+        bench_mode = bool(self.bench_seconds) or self.bench_focus
+
+        deadline = None
+        next_report = None
+        if bench_mode:
+            # Start the counters with the window, not with the screen: the camera is
+            # already running by now, so the frames the sensor spent warming up would
+            # otherwise be averaged into the rates.
+            BENCH.reset()
+            if self.bench_seconds:
+                deadline = time.monotonic() + self.bench_seconds
+            if self.bench_focus:
+                next_report = time.monotonic() + self.BENCH_FOCUS_REPORT_S
+
         while True:
-            frame = self.camera.read_video_stream()
+            if self.bench_focus:
+                # Focus mode is unbounded, so its way out cannot sit behind "a frame
+                # arrived" the way the normal abort does -- a camera that stops
+                # delivering would otherwise strand a device with no console.
+                if self.hw_inputs.check_for_low(keys=[HardwareButtonsConstants.KEY_LEFT,
+                                                      HardwareButtonsConstants.KEY_RIGHT]):
+                    for t in self.threads:
+                        t.stop()
+                    for t in self.threads:
+                        while t.is_alive():
+                            time.sleep(0.01)
+                    self.camera.stop_video_stream_mode()
+                    return False
+
+                if time.monotonic() >= next_report:
+                    # Report the interval just ended, then start a fresh one, so turning
+                    # the lens shows up immediately instead of being diluted by history.
+                    self.threads[0].bench_lines = BENCH.focus_lines()
+                    BENCH.reset()
+                    next_report = time.monotonic() + self.BENCH_FOCUS_REPORT_S
+
+            if deadline is not None and time.monotonic() >= deadline:
+                # Let the live-preview thread finish the frame it is on and leave through
+                # its own loop condition, so it never reads against a closed stream.
+                for t in self.threads:
+                    t.stop()
+                for t in self.threads:
+                    while t.is_alive():
+                        time.sleep(0.01)
+                self.camera.stop_video_stream_mode()
+                return None
+
+            seq, frame = self.camera.read_video_stream_latest()
             if frame is not None:
+                BENCH.begin_pass(seq != last_seq)
+                last_seq = seq
+
                 status = self.decoder.add_image(frame)
 
                 num_frames += 1
@@ -243,8 +337,18 @@ class ScanScreen(BaseScreen):
                 self.threads[0].decoder_fps = decoder_fps
 
                 if status in (DecodeQRStatus.COMPLETE, DecodeQRStatus.INVALID):
-                    self.camera.stop_video_stream_mode()
-                    break
+                    if bench_mode:
+                        # A measurement run has to outlive the payload it is reading:
+                        # an animated QR that finishes reassembling would otherwise end
+                        # the scan partway through the window. Re-running the decoder's
+                        # constructor resets it in place, which keeps the live-preview
+                        # thread's reference to it valid, and leaves the reassembly work
+                        # in the loop for the whole window.
+                        BENCH.completions += 1
+                        self.decoder.__init__(wordlist_language_code=self.decoder.wordlist_language_code)
+                    else:
+                        self.camera.stop_video_stream_mode()
+                        break
 
                 # Notify the live preview thread how our most recent decode went
                 if status == DecodeQRStatus.FALSE:

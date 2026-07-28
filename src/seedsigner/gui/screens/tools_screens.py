@@ -10,12 +10,17 @@ from seedsigner.gui.components import FontAwesomeIconConstants, Fonts, GUIConsta
 
 from seedsigner.gui.screens.screen import RET_CODE__BACK_BUTTON, BaseScreen, ButtonListScreen, ButtonOption, KeyboardScreen
 from seedsigner.hardware.buttons import HardwareButtonsConstants
+from seedsigner.models.bench_stats import BENCH
 from seedsigner.models.settings_definition import SettingsConstants, SettingsDefinition
 
 
 
 @dataclass
 class ToolsImageEntropyLivePreviewScreen(BaseScreen):
+    # When set, the preview runs for a fixed measurement window instead of until the user
+    # clicks to capture. Only the benchmark harness sets it.
+    bench_seconds: float = None
+
     def __post_init__(self):
         super().__post_init__()
 
@@ -34,7 +39,18 @@ class ToolsImageEntropyLivePreviewScreen(BaseScreen):
         max_entropy_frames = 50
         instructions_font = Fonts.get_font(GUIConstants.get_body_font_name(), GUIConstants.get_button_font_size())
 
+        deadline = None
+        if self.bench_seconds:
+            # Start the counters with the window, not with the screen, so the sensor's
+            # warm-up frames are not averaged into the preview rate.
+            BENCH.reset()
+            deadline = time.monotonic() + self.bench_seconds
+
         while True:
+            if deadline is not None and time.monotonic() >= deadline:
+                self.camera.stop_video_stream_mode()
+                return preview_images
+
             if self.hw_inputs.check_for_low(HardwareButtonsConstants.KEY_LEFT):
                 # Have to manually update last input time since we're not in a wait_for loop
                 self.hw_inputs.update_last_input_time()
@@ -112,6 +128,7 @@ class ToolsImageEntropyLivePreviewScreen(BaseScreen):
                     anchor="ms"
                 )
                 self.renderer.show_image()
+                BENCH.entropy_display_frames += 1
 
             if len(preview_images) == max_entropy_frames:
                 # Keep a moving window of the last n preview frames; pop the oldest

@@ -53,6 +53,18 @@ class Camera(Singleton):
         return None
 
 
+    def read_video_stream_latest(self):
+        """The most recent frame together with its capture sequence number.
+
+        Same latest-frame slot `read_video_stream()` serves, so the decode loop sees no
+        change in which frames it is given; the number only lets a caller tell a fresh
+        delivery from the same frame served again between camera deliveries.
+        """
+        if not self._video_stream:
+            raise Exception("Must call start_video_stream first.")
+        return self._video_stream.latest
+
+
     def stop_video_stream_mode(self):
         if self._video_stream is not None:
             self._video_stream.stop()

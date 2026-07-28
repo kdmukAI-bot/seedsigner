@@ -8,13 +8,15 @@ from binascii import a2b_base64, b2a_base64
 from enum import IntEnum
 from embit import psbt, bip39
 from pyzbar import pyzbar
-from pyzbar.pyzbar import ZBarSymbol
+from pyzbar.pyzbar import ZBarSymbol, _pixel_data
+from time import perf_counter_ns
 from urtypes.crypto import PSBT as UR_PSBT
 from urtypes.crypto import Account, Output
 from urtypes.bytes import Bytes
 from base64 import b32encode, b32decode
 
 from seedsigner.helpers.ur2.ur_decoder import URDecoder
+from seedsigner.models.bench_stats import BENCH
 from seedsigner.models.qr_type import QRType
 from seedsigner.models.seed import Seed
 from seedsigner.models.settings import SettingsConstants
@@ -319,11 +321,19 @@ class DecodeQR:
         if image is None:
             return None
 
-        barcodes = pyzbar.decode(image, symbols=[ZBarSymbol.QRCODE], binary=is_binary)
-
-        # if barcodes:
-            # print("--------------- extract_qr_data ---------------")
-            # print(barcodes)
+        # Timed in two segments at the same boundaries the native pipeline reports.
+        # `pyzbar.decode()` is `_pixel_data()` followed by the zbar scan; `_pixel_data()`
+        # accepts and passes through the (pixels, width, height) tuple it produces, so
+        # calling it here and handing the tuple to `decode()` splits the two segments
+        # without doing the conversion twice. The prep segment is the counterpart of the
+        # native build's strided-Y to contiguous-Y copy: for the (480, 480, 3) array
+        # picamera delivers, it is the first-channel extraction down to an 8bpp buffer.
+        t0 = perf_counter_ns()
+        pixel_data = _pixel_data(image)
+        t1 = perf_counter_ns()
+        barcodes = pyzbar.decode(pixel_data, symbols=[ZBarSymbol.QRCODE], binary=is_binary)
+        t2 = perf_counter_ns()
+        BENCH.record_decode(prep_ns=t1 - t0, decode_ns=t2 - t1, hit=bool(barcodes))
 
         for barcode in barcodes:
             # Only pull and return the first barcode
