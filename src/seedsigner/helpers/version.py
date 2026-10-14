@@ -193,7 +193,7 @@ class Version(Singleton):
         # Is it a clean semantic version?
         version = version[1:]  # strip the "v" prefix
         for part in version.split("."):
-            if not part.isnumeric():
+            if not part.isdigit():
                 return False
 
         return True
@@ -452,7 +452,7 @@ class VersionUtils:
         versions. Only checks that the first part is numeric in order to be compatible
         with non-numeric minor versions (e.g. "0.8.5-rc1").
         """
-        if not version_name.startswith("v") and version_name.count(".") >= 1 and version_name.split(".")[0].isnumeric():
+        if not version_name.startswith("v") and version_name.count(".") >= 1 and version_name.split(".")[0].isdigit():
             return f"v{version_name}"
         return version_name
 
